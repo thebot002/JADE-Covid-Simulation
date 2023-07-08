@@ -32,6 +32,7 @@ public class WanderingAgent extends Agent {
     private int sickness_length = -1;
 
     // common agent variables
+    private int container_id;
     private double speed;
     private int contamination_radius;
     private double contamination_probability; // To make vary
@@ -51,12 +52,13 @@ public class WanderingAgent extends Agent {
             doDelete();
         }
 
-        this.status = (String) args[0];
-        this.speed = ((double) args[1]);
-        this.contamination_radius = ((int) args[2]);
-        this.contamination_probability = ((double) args[3]);
-        this.min_contamination_length = ((int) args[4]);
-        this.max_contamination_length = ((int) args[5]);
+        this.container_id = (int) args[0];
+        this.status = (String) args[1];
+        this.speed = ((double) args[2]);
+        this.contamination_radius = ((int) args[3]);
+        this.contamination_probability = ((double) args[4]);
+        this.min_contamination_length = ((int) args[5]);
+        this.max_contamination_length = ((int) args[6]);
 
         if (DEBUG) System.out.println("[" + getName() + "]" + " ready with status " + this.status);
 
@@ -65,7 +67,7 @@ public class WanderingAgent extends Agent {
             DFAgentDescription dfd = new DFAgentDescription();
             dfd.setName(getAID());
             ServiceDescription sd = new ServiceDescription();
-            sd.setType("wanderer-group");
+            sd.setType("wanderer-group-"+container_id);
             sd.setName("Wanderers");
             dfd.addServices(sd);
             DFService.register(this, dfd);
@@ -233,7 +235,7 @@ public class WanderingAgent extends Agent {
         AID[] neighnour_agents;
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription sd = new ServiceDescription();
-        sd.setType("wanderer-group");
+        sd.setType("wanderer-group-"+container_id);
         template.addServices(sd);
 
         try {

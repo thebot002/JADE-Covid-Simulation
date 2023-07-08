@@ -1,20 +1,26 @@
 package agents;
 
+import jade.core.AID;
 import jade.core.Agent;
 import jade.core.ProfileImpl;
 import jade.core.Runtime;
+import jade.domain.DFService;
+import jade.domain.FIPAAgentManagement.DFAgentDescription;
+import jade.domain.FIPAAgentManagement.ServiceDescription;
+import jade.domain.FIPAException;
 import jade.wrapper.AgentContainer;
 import jade.wrapper.AgentController;
 
 import javax.swing.*;
 import javax.swing.border.Border;
 import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
+
+import static java.lang.Thread.sleep;
 
 public class ManagerAgent extends Agent {
 
     // default variables
+    private int container_count = 2;
     private int agent_count = 100;
     private int init_sick = 10;
     private double agent_speed = 1.0;
@@ -23,12 +29,19 @@ public class ManagerAgent extends Agent {
     private int min_contamination_length = 20;
     private int max_contamination_length = 30;
 
+    // containers
+    AgentContainer[] spawned_containers;
+    AID[] controller_agents;
+
+    //debug
+    private final boolean DEBUG = true;
+
     @Override
     protected void setup() {
         JFrame frame = new JFrame();
         frame.setTitle("COVID Sim - Menu");
         frame.setLocation(100,100);
-        frame.setSize(new Dimension(400,300));
+        frame.setSize(new Dimension(400,340));
 
         // Creation of content pane inside
         JPanel contentFrame = new JPanel();
@@ -38,6 +51,11 @@ public class ManagerAgent extends Agent {
 
         // Options pannel
         JPanel options = new JPanel();
+
+        // Agent count
+        options.add(new Label("Container count:"));
+        JTextField containerCountInput = new JTextField(Integer.toString(container_count));
+        options.add(containerCountInput);
 
         // Agent count
         options.add(new Label("Agent count:"));
@@ -76,11 +94,12 @@ public class ManagerAgent extends Agent {
 
 
         // Grid setup
-        options.setLayout(new GridLayout(7,2));
+        options.setLayout(new GridLayout(8,2));
 
         // Start button
         JButton startButton = new JButton("Start simulation");
         startButton.addActionListener(e -> {
+            container_count = Integer.parseInt(containerCountInput.getText());
             agent_count = Integer.parseInt(agentCountInput.getText());
             init_sick = Integer.parseInt(sickCountInput.getText());
             agent_speed = Double.parseDouble(agentSpeedInput.getText());
@@ -100,6 +119,32 @@ public class ManagerAgent extends Agent {
             }
 
             createSubContainer();
+
+            try {
+                sleep(1000);
+            } catch (InterruptedException ex) {
+                throw new RuntimeException(ex);
+            }
+
+            // Find the list of wandering agents
+            DFAgentDescription template = new DFAgentDescription();
+            ServiceDescription sd = new ServiceDescription();
+            sd.setType("controller-group");
+            template.addServices(sd);
+            try {
+                DFAgentDescription[] result = DFService.search(this, template);
+                controller_agents = new AID[container_count];
+                for (int i = 0; i<container_count; ++i) controller_agents[i] = result[i].getName();
+
+                if (DEBUG) {
+                    System.out.println("Found the following controller agents:");
+                    for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
+                }
+            }
+            catch (FIPAException fe) {
+                fe.printStackTrace();
+            }
+
         });
 
         // Frame components in a column layout
@@ -117,34 +162,42 @@ public class ManagerAgent extends Agent {
     }
 
     private void createSubContainer(){
-        // Sub container
-        String container_name = "Container-1";
 
-        try {
-            Runtime runtime = Runtime.instance();
-            ProfileImpl pc = new ProfileImpl(false);
-            pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
-            pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
-            AgentContainer ac = runtime.createAgentContainer(pc);
-            ac.start();
+        spawned_containers = new AgentContainer[container_count];
 
-            // Creating the controller
-            Object[] controller_arguments = new Object[]{
-                    container_name,
-                    agent_count,
-                    init_sick,
-                    agent_speed,
-                    contamination_radius,
-                    contamination_prob,
-                    min_contamination_length,
-                    max_contamination_length
-            };
-            AgentController controllerAgent = ac.createNewAgent("Controller", "agents.ControllerAgent", controller_arguments);
-            controllerAgent.start();
+        for (int i = 0; i < container_count; i++) {
 
-        }
-        catch (Exception e){
-            e.printStackTrace();
+            // Sub container
+            int container_id = i+1;
+            String container_name = "Container-" + container_id;
+
+
+            try {
+                Runtime runtime = Runtime.instance();
+                ProfileImpl pc = new ProfileImpl(false);
+                pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
+                pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
+                AgentContainer ac = runtime.createAgentContainer(pc);
+                spawned_containers[i] = ac;
+                ac.start();
+
+                // Creating the controller
+                Object[] controller_arguments = new Object[]{
+                        container_id,
+                        agent_count,
+                        init_sick,
+                        agent_speed,
+                        contamination_radius,
+                        contamination_prob,
+                        min_contamination_length,
+                        max_contamination_length
+                };
+                AgentController controllerAgent = ac.createNewAgent("Controller-"+(i+1), "agents.ControllerAgent", controller_arguments);
+                controllerAgent.start();
+
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
     }
 }

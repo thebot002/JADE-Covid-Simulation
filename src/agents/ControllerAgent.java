@@ -67,7 +67,7 @@ public class ControllerAgent extends Agent {
         }
 
         // Setup variables
-        String container_name = (String) args[0];
+        int container_id = ((int) args[0]);
         this.agent_count = ((int) args[1]);
         int init_sick = ((int) args[2]);
         double agent_speed = ((double) args[3]);
@@ -75,6 +75,20 @@ public class ControllerAgent extends Agent {
         double contamination_prob = ((double) args[5]);
         int min_contamination_length = ((int) args[6]);
         int max_contamination_length = ((int) args[7]);
+
+        // Registering to the Wanderer group service
+        try {
+            DFAgentDescription dfd = new DFAgentDescription();
+            dfd.setName(getAID());
+            ServiceDescription sd = new ServiceDescription();
+            sd.setType("controller-group");
+            sd.setName("Controllers");
+            dfd.addServices(sd);
+            DFService.register(this, dfd);
+        }
+        catch (FIPAException fe) {
+            fe.printStackTrace();
+        }
 
         // Generation of agents
         AgentContainer ac = getContainerController();
@@ -96,7 +110,8 @@ public class ControllerAgent extends Agent {
             // Generation of agents
             for (int i=0; i<agent_count; i++){
                 String init_status = arrayContains(sick_indices, i)? "sick": "healthy";
-                AgentController wandererAgent = ac.createNewAgent("Wanderer-" + i, "agents.WanderingAgent", new Object[]{
+                AgentController wandererAgent = ac.createNewAgent("Wanderer-" + container_id + "-" + i, "agents.WanderingAgent", new Object[]{
+                        container_id,
                         init_status,
                         agent_speed,
                         contamination_radius,
@@ -117,7 +132,7 @@ public class ControllerAgent extends Agent {
         // Find the list of wandering agents
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription sd = new ServiceDescription();
-        sd.setType("wanderer-group");
+        sd.setType("wanderer-group-" + container_id);
         template.addServices(sd);
         try {
             DFAgentDescription[] result = DFService.search(this, template);
@@ -190,7 +205,7 @@ public class ControllerAgent extends Agent {
 
         // Container frame
         container_frame = new JFrame();
-        container_frame.setTitle(container_name);
+        container_frame.setTitle("Container-"+container_id);
         container_frame.setLocation(100,100);
 
 
@@ -206,7 +221,7 @@ public class ControllerAgent extends Agent {
         container_frame.add(contentPane);
         contentPane.setLayout(new BorderLayout(20,20));
 
-        JLabel title = new JLabel(container_name + " - simulation", SwingConstants.CENTER);
+        JLabel title = new JLabel("Container-" + container_id + " - simulation", SwingConstants.CENTER);
         title.setFont(new Font("Arial", Font.BOLD, 30));
         contentPane.add(title, BorderLayout.NORTH);
 
