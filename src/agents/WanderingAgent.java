@@ -22,7 +22,7 @@ public class WanderingAgent extends Agent {
 
     // Direction variables
     private int headingDegrees;
-    private final int MAX_DIR_CHANGE = 45;
+    private final int MAX_DIR_CHANGE = 20;
 
     // Neighbours
     AID[] neighbour_agents;
@@ -208,16 +208,17 @@ public class WanderingAgent extends Agent {
 
         double headingRads = (this.headingDegrees * Math.PI) / 180;
 
+        double dx = Math.cos(headingRads);
+        double dy = Math.sin(headingRads);
+
+        // Bounce on walls
+        if (position[0] + dx < 0 || position[0] + dx > MAX_X ) dx *= -1;
+        if (position[1] + dy < 0 || position[1] + dy > MAX_Y ) dy *= -1;
+        this.headingDegrees = (int) (Math.atan2(dy,dx) * 180.0 / Math.PI);
+
         // New position
-        this.position[0] += Math.cos(headingRads);
-        this.position[1] += Math.sin(headingRads);
-
-        // Handeling of the borders with looping around
-        if (position[0] < 0) position[0] += this.MAX_X;
-        else this.position[0] %= this.MAX_X;
-
-        if (position[1] < 0) position[1] += this.MAX_Y;
-        else this.position[1] %= this.MAX_Y;
+        this.position[0] += dx;
+        this.position[1] += dy;
 
         if (DEBUG) System.out.println("My position is now" + ((int)this.position[0]) + ", " + (int)this.position[1]);
 
@@ -239,9 +240,9 @@ public class WanderingAgent extends Agent {
             DFAgentDescription[] result = DFService.search(this, template);
             neighnour_agents = new AID[result.length-1];
             int agent_number = 0;
-            for (int i = 0; i < result.length; ++i) {
-                AID agent = result[i].getName();
-                if (!Objects.equals(agent, getAID())){
+            for (DFAgentDescription dfAgentDescription : result) {
+                AID agent = dfAgentDescription.getName();
+                if (!Objects.equals(agent, getAID())) {
                     neighnour_agents[agent_number] = agent;
                     agent_number++;
                 }
