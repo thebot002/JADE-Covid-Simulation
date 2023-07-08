@@ -30,6 +30,7 @@ public class ControllerAgent extends Agent {
     private double[][] agent_positions;
     private AgentStatus[] agent_statuses;
     private int sick_agent_count;
+    private int contamination_radius;
 
     // DEBUG
     private final boolean DEBUG = false;
@@ -70,7 +71,7 @@ public class ControllerAgent extends Agent {
         this.agent_count = ((int) args[1]);
         int init_sick = ((int) args[2]);
         double agent_speed = ((double) args[3]);
-        int contamination_radius = ((int) args[4]);
+        contamination_radius = ((int) args[4]);
         double contamination_prob = ((double) args[5]);
         int min_contamination_length = ((int) args[6]);
         int max_contamination_length = ((int) args[7]);
@@ -343,7 +344,11 @@ public class ControllerAgent extends Agent {
                 g.setColor(status.color());
                 int x = (int) (dot[0] * DRAW_SCALE) + DRAW_MARGIN;
                 int y = (int) (dot[1] * DRAW_SCALE) + DRAW_MARGIN;
-                g.fillOval(x, y, DRAW_SCALE, DRAW_SCALE);
+                g.fillOval(x-(DRAW_SCALE/2), y-(DRAW_SCALE/2), DRAW_SCALE, DRAW_SCALE);
+
+                if (status == AgentStatus.SICK){
+                    g.drawOval(x-(DRAW_SCALE*contamination_radius),y-(DRAW_SCALE*contamination_radius),DRAW_SCALE*contamination_radius*2, DRAW_SCALE*contamination_radius*2);
+                }
             }
         }
     }
