@@ -1,6 +1,5 @@
 package agents;
 
-import graphics.ContainerFrame;
 import jade.core.AID;
 import jade.core.Agent;
 import jade.wrapper.AgentContainer;
@@ -13,6 +12,8 @@ import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentController;
 
+import javax.swing.*;
+import java.awt.*;
 import java.util.Objects;
 import java.util.Random;
 
@@ -21,7 +22,11 @@ import static java.lang.Thread.sleep;
 public class ControllerAgent extends Agent {
 
     private String container_name;
+
+    // Agents variables
     private AID[] wanderer_agents;
+    private double[][] agent_positions;
+    private String[] agent_statuses;
 
     // DEBUG
     private final boolean DEBUG = false;
@@ -37,6 +42,9 @@ public class ControllerAgent extends Agent {
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
+
+    // Panels
+    WandererEnvironmentPanel wandererEnvironmentPanel;
 
 
     @Override
@@ -56,14 +64,14 @@ public class ControllerAgent extends Agent {
             int potential_ind;
             do {
                 potential_ind = rand.nextInt(agent_count);
-            } while (array_contains(sick_indices, potential_ind));
+            } while (arrayContains(sick_indices, potential_ind));
             sick_indices[i] = potential_ind;
         }
 
         try {
             // Generation of agents
             for (int i=0; i<agent_count; i++){
-                String init_status = array_contains(sick_indices, i)? "sick": "healthy";
+                String init_status = arrayContains(sick_indices, i)? "sick": "healthy";
                 AgentController wandererAgent = ac.createNewAgent("Wanderer-" + i, "agents.WanderingAgent", new Object[]{
                         init_status,
                         agent_speed,
@@ -89,8 +97,8 @@ public class ControllerAgent extends Agent {
         template.addServices(sd);
         try {
             DFAgentDescription[] result = DFService.search(this, template);
-            wanderer_agents = new AID[result.length];
-            for (int i = 0; i < result.length; ++i) wanderer_agents[i] = result[i].getName();
+            wanderer_agents = new AID[agent_count];
+            for (int i = 0; i<agent_count; ++i) wanderer_agents[i] = result[i].getName();
 
             if (DEBUG) {
                 System.out.println("Found the following wandering agents:");
@@ -112,19 +120,15 @@ public class ControllerAgent extends Agent {
                 MessageTemplate.MatchPerformative(ACLMessage.INFORM),
                 MessageTemplate.MatchOntology("status"));
 
-        String[] replies = new String[wanderer_agents.length];
-        for (int i = 0; i < wanderer_agents.length; i++) replies[i] = blockingReceive(status_message_template).getContent();
+        String[] replies = new String[agent_count];
+        for (int i = 0; i < agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
 
-        //
-        double[][] dots = new double[wanderer_agents.length][2];
-        String[] statuses = new String[wanderer_agents.length];
-        for (int i=0; i< wanderer_agents.length; i++) {
-            String[] status = replies[i].split(";");
-            dots[i][0] = Double.parseDouble(status[0]);
-            dots[i][1] = Double.parseDouble(status[1]);
-
-            statuses[i] = status[2];
-        }
+        // Defining sizes of agent variables
+        agent_positions = new double[agent_count][2];
+        agent_statuses = new String[agent_count];
+        
+        // Retrieving initial agent positions and statuses
+        processReplies(replies);
 
         if (DEBUG) {
             System.out.println("New locations");
@@ -136,9 +140,22 @@ public class ControllerAgent extends Agent {
         move_go_msg.setOntology("GO");
         for (AID agent: wanderer_agents) move_go_msg.addReceiver(agent);
 
-        // print frame
-        ContainerFrame f= new ContainerFrame(dots, statuses);
-        f.setTitle(container_name);
+
+        // Container frame
+        JFrame container_frame = new JFrame();
+        container_frame.setTitle("Drawing a Circle");
+        container_frame.setLocation(100,100);
+        container_frame.setPreferredSize(new Dimension(600,600));
+//        container_frame.setBounds(100, 100, (MAX_X*SCALE)+(4*MARGIN), (MAX_Y*SCALE)+(6*MARGIN));
+
+        wandererEnvironmentPanel = new WandererEnvironmentPanel();
+        container_frame.add(wandererEnvironmentPanel);
+
+        container_frame.pack();
+        container_frame.setVisible(true);
+        container_frame.setResizable(false);
+        container_frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE); // Exit on close
+
 
 
         // Initialize loop
@@ -153,8 +170,8 @@ public class ControllerAgent extends Agent {
                 send(move_go_msg);
 
                 // Receive new locations
-                String[] replies = new String[wanderer_agents.length];
-                for (int i = 0; i < wanderer_agents.length; i++) replies[i] = blockingReceive(status_message_template).getContent();
+                String[] replies = new String[agent_count];
+                for (int i = 0; i<agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
 
                 if (DEBUG) {
                     System.out.println("New locations");
@@ -162,27 +179,58 @@ public class ControllerAgent extends Agent {
                 }
 
                 // Redraw container frame
-                double[][] dots = new double[wanderer_agents.length][2];
-                String[] statuses = new String[wanderer_agents.length];
-                for (int i=0; i< wanderer_agents.length; i++) {
-                    String[] status = replies[i].split(";");
-                    dots[i][0] = Double.parseDouble(status[0]);
-                    dots[i][1] = Double.parseDouble(status[1]);
-
-                    statuses[i] = status[2];
-                }
-                f.setDots(dots, statuses);
+                processReplies(replies);
+                wandererEnvironmentPanel.repaint();
 
                 // Tracking time end
                 long duration_s = System.currentTimeMillis() - start_time;
                 if (DEBUG) System.out.println("[Controller] Iteration done in (ms): " + duration_s);
             }
         });
+    }
+    
+    private void processReplies(String[] replies){
+        for (int i=0; i<agent_count; i++) {
+            String[] status = replies[i].split(";");
+            agent_positions[i][0] = Double.parseDouble(status[0]);
+            agent_positions[i][1] = Double.parseDouble(status[1]);
 
-
+            agent_statuses[i] = status[2];
+        }
     }
 
-    private boolean array_contains(int[] array, int element){
+    private class WandererEnvironmentPanel extends JPanel {
+        private final int DRAW_MARGIN = 10;
+        private final int DRAW_SCALE = 5;
+
+        public WandererEnvironmentPanel() {
+            super();
+            
+            setSize(((MAX_X*DRAW_SCALE) + (DRAW_MARGIN*2)), ((MAX_Y*DRAW_SCALE) + (DRAW_MARGIN*2)));
+            setBackground(Color.BLACK);
+        }
+
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+
+            // Frame
+            g.setColor(Color.WHITE);
+            g.drawRect(DRAW_MARGIN,DRAW_MARGIN,DRAW_SCALE*MAX_X,DRAW_SCALE*MAX_Y);
+
+            // Dots
+            for (int i=0; i<agent_count; i++) {
+                double[] dot = agent_positions[i];
+                AgentStatus status = AgentStatus.fromString(agent_statuses[i]);
+
+                g.setColor(status.color());
+                int x = (int) (dot[0] * DRAW_SCALE) + DRAW_MARGIN;
+                int y = (int) (dot[1] * DRAW_SCALE) + DRAW_MARGIN;
+                g.fillOval(x, y, DRAW_SCALE, DRAW_SCALE);
+            }
+        }
+    }
+
+    private boolean arrayContains(int[] array, int element){
         boolean result = false;
         for (Integer array_element: array) result |= (Objects.equals(array_element, element));
         return result;
