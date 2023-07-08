@@ -11,9 +11,13 @@ import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentController;
+import jade.wrapper.StaleProxyException;
 
 import javax.swing.*;
+import javax.swing.border.Border;
 import java.awt.*;
+import java.awt.event.WindowEvent;
+import java.awt.event.WindowListener;
 import java.util.Objects;
 import java.util.Random;
 
@@ -24,7 +28,8 @@ public class ControllerAgent extends Agent {
     // Agents variables
     private AID[] wanderer_agents;
     private double[][] agent_positions;
-    private String[] agent_statuses;
+    private AgentStatus[] agent_statuses;
+    private int sick_agent_count;
 
     // DEBUG
     private final boolean DEBUG = false;
@@ -34,8 +39,20 @@ public class ControllerAgent extends Agent {
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
 
+    private ACLMessage move_go_msg;
+    private TickerBehaviour loop_behavior;
+    private final MessageTemplate status_message_template = MessageTemplate.and(
+            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+            MessageTemplate.MatchOntology("status"));
+
     // Panels
-    WandererEnvironmentPanel wandererEnvironmentPanel;
+    private JFrame container_frame;
+    private WandererEnvironmentPanel wandererEnvironmentPanel;
+    private JFrame exit_confirmation_window;
+    private JLabel exit_confirmation_info;
+
+    private boolean is_running = true;
+    private boolean is_done = false;
 
 
     @Override
@@ -62,6 +79,7 @@ public class ControllerAgent extends Agent {
         AgentContainer ac = getContainerController();
 
         // Choosing sick agents
+        sick_agent_count = init_sick;
         int[] sick_indices = new int[init_sick];
 
         Random rand = new Random();
@@ -121,16 +139,12 @@ public class ControllerAgent extends Agent {
         send(ready_message);
 
         // Receive initial locations back
-        MessageTemplate status_message_template = MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("status"));
-
         String[] replies = new String[agent_count];
         for (int i = 0; i < agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
 
         // Defining sizes of agent variables
         agent_positions = new double[agent_count][2];
-        agent_statuses = new String[agent_count];
+        agent_statuses = new AgentStatus[agent_count];
         
         // Retrieving initial agent positions and statuses
         processReplies(replies);
@@ -141,32 +155,115 @@ public class ControllerAgent extends Agent {
         }
 
         // Setup move go message
-        ACLMessage move_go_msg = new ACLMessage(ACLMessage.INFORM);
+        move_go_msg = new ACLMessage(ACLMessage.INFORM);
         move_go_msg.setOntology("GO");
         for (AID agent: wanderer_agents) move_go_msg.addReceiver(agent);
 
 
+        // Creation of exit confirmation window
+        exit_confirmation_window = new JFrame();
+        exit_confirmation_window.setTitle("Simulation still running");
+        exit_confirmation_window.setLayout(new FlowLayout(FlowLayout.CENTER,10,10));
+
+        exit_confirmation_info = new JLabel("The simulation is still running, stay or stop simulation:");
+        exit_confirmation_window.add(exit_confirmation_info);
+
+        JButton stay_button = new JButton("Stay");
+        stay_button.addActionListener(e -> {
+            exit_confirmation_window.setVisible(false);
+            is_running = true;
+        });
+        exit_confirmation_window.add(stay_button);
+
+        JButton exit_button = new JButton("Exit simulation");
+        exit_button.addActionListener(e -> {
+            exit_confirmation_window.dispose();
+            doDelete();
+        });
+        exit_confirmation_window.add(exit_button);
+
+        // Finalization of frame
+        exit_confirmation_window.setBounds(200,200,600, 80);
+        exit_confirmation_window.setResizable(false);
+
+
         // Container frame
-        JFrame container_frame = new JFrame();
+        container_frame = new JFrame();
         container_frame.setTitle(container_name);
         container_frame.setLocation(100,100);
-        container_frame.setPreferredSize(new Dimension(600,600));
+
+
+
+//        container_frame.setSize(600,600);
+//        container_frame.setPreferredSize(new Dimension(560,590));
 //        container_frame.setBounds(100, 100, (MAX_X*SCALE)+(4*MARGIN), (MAX_Y*SCALE)+(6*MARGIN));
 
+        // Content pane
+        JPanel contentPane = new JPanel();
+        Border padding = BorderFactory.createEmptyBorder(10, 10, 10, 10);
+        contentPane.setBorder(padding);
+        container_frame.add(contentPane);
+        contentPane.setLayout(new BorderLayout(20,20));
+
+        JLabel title = new JLabel(container_name + " - simulation", SwingConstants.CENTER);
+        title.setFont(new Font("Arial", Font.BOLD, 30));
+        contentPane.add(title, BorderLayout.NORTH);
+
         wandererEnvironmentPanel = new WandererEnvironmentPanel();
-        container_frame.add(wandererEnvironmentPanel);
+        contentPane.add(wandererEnvironmentPanel, BorderLayout.CENTER);
 
-        container_frame.pack();
+
+        // Finalization of Frame
         container_frame.setVisible(true);
+
+        Insets insets = container_frame.getInsets();
+        int addedWidth = insets.left + insets.right;
+        int addedHeight = insets.top + insets.bottom;
+
+        System.out.println(title.getSize());
+
+        container_frame.setSize(540+addedWidth, 596+addedHeight);
+
         container_frame.setResizable(false);
-        container_frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE); // Exit on close
+        container_frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        container_frame.addWindowListener(new WindowListener() {
 
+            @Override
+            public void windowOpened(WindowEvent e) {}
 
+            @Override
+            public void windowClosing(WindowEvent e) {
+                if(is_done) {
+                    doDelete();
+                    return;
+                }
+                is_running = false;
+                exit_confirmation_window.setVisible(true);
+            }
+
+            @Override
+            public void windowClosed(WindowEvent e) {}
+
+            @Override
+            public void windowIconified(WindowEvent e) {}
+
+            @Override
+            public void windowDeiconified(WindowEvent e) {}
+
+            @Override
+            public void windowActivated(WindowEvent e) {}
+
+            @Override
+            public void windowDeactivated(WindowEvent e) {}
+        });
 
         // Initialize loop
-        addBehaviour(new TickerBehaviour(this, 100) {
+        loop_behavior = new TickerBehaviour(this, 100) {
             @Override
             protected void onTick() {
+
+                // Return if it is not running anymore
+                if (! is_running) return;
 
                 // Tracking time
                 long start_time = System.currentTimeMillis();
@@ -187,20 +284,37 @@ public class ControllerAgent extends Agent {
                 processReplies(replies);
                 wandererEnvironmentPanel.repaint();
 
+                // Process if simulation is done
+                if (sick_agent_count == 0){
+                    is_done = true;
+                    exit_confirmation_window.setTitle("Simulation done");
+                    exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
+
+                    // Creation of exiting window
+                    exit_confirmation_window.setVisible(true);
+
+                    // Remove the ticking loop
+                    myAgent.removeBehaviour(loop_behavior);
+                }
+
                 // Tracking time end
                 long duration_s = System.currentTimeMillis() - start_time;
                 if (DEBUG) System.out.println("[Controller] Iteration done in (ms): " + duration_s);
             }
-        });
+        };
+
+        addBehaviour(loop_behavior);
     }
     
     private void processReplies(String[] replies){
+        sick_agent_count = 0;
         for (int i=0; i<agent_count; i++) {
             String[] status = replies[i].split(";");
             agent_positions[i][0] = Double.parseDouble(status[0]);
             agent_positions[i][1] = Double.parseDouble(status[1]);
 
-            agent_statuses[i] = status[2];
+            agent_statuses[i] = AgentStatus.fromString(status[2]);
+            if (agent_statuses[i] == AgentStatus.SICK) sick_agent_count++;
         }
     }
 
@@ -210,7 +324,6 @@ public class ControllerAgent extends Agent {
 
         public WandererEnvironmentPanel() {
             super();
-            
             setSize(((MAX_X*DRAW_SCALE) + (DRAW_MARGIN*2)), ((MAX_Y*DRAW_SCALE) + (DRAW_MARGIN*2)));
             setBackground(Color.BLACK);
         }
@@ -225,7 +338,7 @@ public class ControllerAgent extends Agent {
             // Dots
             for (int i=0; i<agent_count; i++) {
                 double[] dot = agent_positions[i];
-                AgentStatus status = AgentStatus.fromString(agent_statuses[i]);
+                AgentStatus status = agent_statuses[i];
 
                 g.setColor(status.color());
                 int x = (int) (dot[0] * DRAW_SCALE) + DRAW_MARGIN;
@@ -239,5 +352,26 @@ public class ControllerAgent extends Agent {
         boolean result = false;
         for (Integer array_element: array) result |= (Objects.equals(array_element, element));
         return result;
+    }
+
+    @Override
+    public void doDelete() {
+        // Sending auto-destruct signal to wanderers
+        move_go_msg.setContent("delete");
+        send(move_go_msg);
+
+        int confirmations = 0;
+        for (int i = 0; i < agent_count; i++) {
+            String response = blockingReceive(status_message_template).getContent();
+            if (Objects.equals(response, "deleted")) confirmations++;
+        }
+
+        if (confirmations != agent_count) System.out.println("Not all agents have been deleted");
+        agent_count = 0;
+
+        // Deleting container window
+        container_frame.dispose();
+
+        super.doDelete();
     }
 }

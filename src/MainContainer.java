@@ -12,7 +12,7 @@ public class MainContainer {
         try {
             Runtime runtime = Runtime.instance();
             Properties properties = new ExtendedProperties();
-            properties.setProperty(Profile.GUI, "false");
+            properties.setProperty(Profile.GUI, "true");
             ProfileImpl pc = new ProfileImpl(properties);
 
             AgentContainer mc = runtime.createMainContainer(pc);

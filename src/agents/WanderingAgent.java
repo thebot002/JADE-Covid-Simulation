@@ -138,9 +138,16 @@ public class WanderingAgent extends Agent {
 
                 if (DEBUG) System.out.println("[" + getName() + "]" + " Received GO");
 
+                // 1.1
+                if (Objects.equals(go_msg.getContent(), "delete")){
+                    status_message.setContent("deleted");
+                    send(status_message);
+                    doDelete();
+                    return;
+                }
+
                 // 2. Move
                 move();
-
 
                 // 3. Exhale message to all neighbours
                 exhale_message.setContent(statusString());
