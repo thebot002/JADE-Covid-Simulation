@@ -21,8 +21,6 @@ import static java.lang.Thread.sleep;
 
 public class ControllerAgent extends Agent {
 
-    private String container_name;
-
     // Agents variables
     private AID[] wanderer_agents;
     private double[][] agent_positions;
@@ -31,14 +29,7 @@ public class ControllerAgent extends Agent {
     // DEBUG
     private final boolean DEBUG = false;
 
-    // Setup variables
-    private int agent_count = 100;
-    private int init_sick = 10;
-    private double agent_speed = 1.0;
-    private int contamination_radius = 5;
-    private double contamination_prob = 0.8;
-    private int min_contamination_length = 20;
-    private int max_contamination_length = 30;
+    private int agent_count;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
@@ -49,9 +40,23 @@ public class ControllerAgent extends Agent {
 
     @Override
     protected void setup() {
-        // Retrieving name of current container
+
+        // Retrieving initial status and parameters
         Object[] args = getArguments();
-        if (args.length > 0) container_name = (String) args[0];
+        if (args.length < 8) {
+            System.out.println("Not enough arguments, self destruction");
+            doDelete();
+        }
+
+        // Setup variables
+        String container_name = (String) args[0];
+        this.agent_count = ((int) args[1]);
+        int init_sick = ((int) args[2]);
+        double agent_speed = ((double) args[3]);
+        int contamination_radius = ((int) args[4]);
+        double contamination_prob = ((double) args[5]);
+        int min_contamination_length = ((int) args[6]);
+        int max_contamination_length = ((int) args[7]);
 
         // Generation of agents
         AgentContainer ac = getContainerController();
@@ -143,7 +148,7 @@ public class ControllerAgent extends Agent {
 
         // Container frame
         JFrame container_frame = new JFrame();
-        container_frame.setTitle("Drawing a Circle");
+        container_frame.setTitle(container_name);
         container_frame.setLocation(100,100);
         container_frame.setPreferredSize(new Dimension(600,600));
 //        container_frame.setBounds(100, 100, (MAX_X*SCALE)+(4*MARGIN), (MAX_Y*SCALE)+(6*MARGIN));

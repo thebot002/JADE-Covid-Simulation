@@ -52,7 +52,6 @@ public class WanderingAgent extends Agent {
         }
 
         this.status = (String) args[0];
-
         this.speed = ((double) args[1]);
         this.contamination_radius = ((int) args[2]);
         this.contamination_probability = ((double) args[3]);
