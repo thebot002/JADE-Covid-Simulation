@@ -39,6 +39,9 @@ public class WanderingAgent extends Agent {
     private int min_contamination_length;
     private int max_contamination_length;
 
+    // Agent service description
+    private DFAgentDescription dfd;
+
     // DEBUG
     private final boolean DEBUG = false;
 
@@ -64,7 +67,7 @@ public class WanderingAgent extends Agent {
 
         // Registering to the Wanderer group service
         try {
-            DFAgentDescription dfd = new DFAgentDescription();
+            dfd = new DFAgentDescription();
             dfd.setName(getAID());
             ServiceDescription sd = new ServiceDescription();
             sd.setType("wanderer-group-"+container_id);
@@ -258,4 +261,13 @@ public class WanderingAgent extends Agent {
         return null;
     }
 
+    @Override
+    public void doDelete() {
+//        try {
+//            DFService.deregister(this,dfd);
+//        } catch (FIPAException e) {
+//            throw new RuntimeException(e);
+//        }
+        super.doDelete();
+    }
 }

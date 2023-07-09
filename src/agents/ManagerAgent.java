@@ -1,10 +1,13 @@
 package agents;
 
 import jade.core.*;
+import jade.core.behaviours.CyclicBehaviour;
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
+import jade.lang.acl.ACLMessage;
+import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentContainer;
 import jade.wrapper.AgentController;
 
@@ -13,13 +16,14 @@ import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.util.Objects;
 
 import static java.lang.Thread.sleep;
 
 public class ManagerAgent extends Agent {
 
     // This agent
-    Agent this_agent;
+    private Agent this_agent;
 
     // default variables
     private int container_count = 2;
@@ -44,9 +48,27 @@ public class ManagerAgent extends Agent {
             minContaminationLengthInput,
             maxContaminationLengthInput;
 
-    // containers
-    AgentContainer[] spawned_containers;
-    AID[] controller_agents;
+    // Controller agents
+    private AID[] controller_agents;
+
+    // Runtime variables
+    private int done_containers = 0;
+
+    // Graphics
+    JFrame exit_confirmation_window;
+    JLabel exit_confirmation_info;
+
+    // Message templates
+    private final MessageTemplate done_message_template = MessageTemplate.and(
+            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+            MessageTemplate.MatchOntology("done"));
+
+    private final MessageTemplate quit_message_template = MessageTemplate.and(
+            MessageTemplate.MatchPerformative(ACLMessage.REQUEST),
+            MessageTemplate.MatchOntology("quit"));
+
+    // Behaviors
+    private WaitDoneRequest done_request_behavior = new WaitDoneRequest();
 
     //debug
     private final boolean DEBUG = true;
@@ -55,6 +77,7 @@ public class ManagerAgent extends Agent {
     protected void setup() {
         this_agent = this;
         createMenuWindow();
+        createExitConfirmationWindow();
     }
 
     private void createMenuWindow(){
@@ -176,6 +199,26 @@ public class ManagerAgent extends Agent {
             catch (FIPAException fe) {
                 fe.printStackTrace();
             }
+
+            // sending introduction to controllers
+            ACLMessage intro_message = new ACLMessage(ACLMessage.INFORM);
+            intro_message.setOntology("intro");
+            for (AID agent: controller_agents) intro_message.addReceiver(agent);
+            send(intro_message);
+
+            // Waiting for ready from all controllers
+            MessageTemplate ready_message_template = MessageTemplate.and(
+                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                    MessageTemplate.MatchOntology("ready"));
+            for (AID ignored : controller_agents) blockingReceive(ready_message_template);
+
+            // Send back go to all
+            ACLMessage go_message = new ACLMessage(ACLMessage.INFORM);
+            go_message.setOntology("GO");
+            for (AID agent: controller_agents) go_message.addReceiver(agent);
+            send(go_message);
+
+            this_agent.addBehaviour(done_request_behavior);
         }
     }
 
@@ -211,8 +254,6 @@ public class ManagerAgent extends Agent {
     }
 
     private void createSubContainer(){
-
-        spawned_containers = new AgentContainer[container_count];
 
         int container_id;
         String container_name;
@@ -310,5 +351,63 @@ public class ManagerAgent extends Agent {
 //        }
             }
         }
+    }
+
+    private void createExitConfirmationWindow(){
+        // Creation of exit confirmation window
+        exit_confirmation_window = new JFrame();
+        exit_confirmation_window.setTitle("Simulation still running");
+        exit_confirmation_window.setLayout(new FlowLayout(FlowLayout.CENTER,10,10));
+
+        exit_confirmation_info = new JLabel("The simulation is still running, stay or stop simulation:");
+        exit_confirmation_window.add(exit_confirmation_info);
+
+        JButton stay_button = new JButton("Stay");
+        stay_button.addActionListener(e -> {
+            exit_confirmation_window.setVisible(false);
+        });
+        exit_confirmation_window.add(stay_button);
+
+        JButton exit_button = new JButton("Exit simulation");
+        exit_button.addActionListener(e -> {
+            exit_confirmation_window.setVisible(false);
+            deleteContainers();
+        });
+        exit_confirmation_window.add(exit_button);
+
+        // Finalization of frame
+        exit_confirmation_window.setBounds(200,200,600, 80);
+        exit_confirmation_window.setResizable(false);
+    }
+
+    private class WaitDoneRequest extends CyclicBehaviour {
+
+        @Override
+        public void action() {
+            String message = blockingReceive(done_message_template).getContent();
+            switch (message) {
+                case "container done" -> done_containers += 1;
+                case "force" -> {
+                    System.out.println("Force deletion");
+                    deleteContainers();
+                    return;
+                }
+                case "container back" -> done_containers -= 1;
+            }
+
+            // Handle end of process
+            if (done_containers == container_count){
+                exit_confirmation_window.setTitle("Simulation done");
+                exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
+                exit_confirmation_window.setVisible(true);
+            }
+        }
+    }
+
+    private void deleteContainers() {
+        ACLMessage kill_message = new ACLMessage(ACLMessage.INFORM);
+        kill_message.setOntology("kill");
+        for (AID controller: controller_agents) kill_message.addReceiver(controller);
+        send(kill_message);
     }
 }

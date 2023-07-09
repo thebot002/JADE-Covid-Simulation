@@ -4,6 +4,7 @@ import jade.core.AID;
 import jade.core.Agent;
 import jade.core.ProfileImpl;
 import jade.core.Runtime;
+import jade.core.behaviours.CyclicBehaviour;
 import jade.wrapper.AgentContainer;
 import jade.core.behaviours.TickerBehaviour;
 import jade.domain.DFService;
@@ -47,25 +48,25 @@ public class ControllerAgent extends Agent {
     private AgentStatus[] agent_statuses;
 
     private AgentContainer ac;
+    private DFAgentDescription dfd;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
 
-    private ACLMessage move_go_msg;
-    private TickerBehaviour loop_behavior;
     private final MessageTemplate status_message_template = MessageTemplate.and(
             MessageTemplate.MatchPerformative(ACLMessage.INFORM),
             MessageTemplate.MatchOntology("status"));
+    private final MessageTemplate kill_message_template = MessageTemplate.and(
+            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+            MessageTemplate.MatchOntology("kill"));
+    private ACLMessage move_go_msg;
+    private ACLMessage done_message;
 
     // Panels
     private JFrame container_frame;
     private WandererEnvironmentPanel wandererEnvironmentPanel;
     private JFrame exit_confirmation_window;
     private JLabel exit_confirmation_info;
-
-    private boolean is_running = true;
-    private boolean is_done = false;
-
 
     @Override
     protected void setup() {
@@ -93,7 +94,7 @@ public class ControllerAgent extends Agent {
 
         // Registering to the Wanderer group service
         try {
-            DFAgentDescription dfd = new DFAgentDescription();
+            dfd = new DFAgentDescription();
             dfd.setName(getAID());
             ServiceDescription sd = new ServiceDescription();
             sd.setType("controller-group");
@@ -104,6 +105,17 @@ public class ControllerAgent extends Agent {
         catch (FIPAException fe) {
             fe.printStackTrace();
         }
+
+        // Waiting for introduction from manager
+        ACLMessage manager_intro_message = blockingReceive(MessageTemplate.and(
+                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                MessageTemplate.MatchOntology("intro")));
+        AID manager_agent = manager_intro_message.getSender();
+
+        // Create done message to manager
+        done_message = new ACLMessage(ACLMessage.INFORM);
+        done_message.setOntology("done");
+        done_message.addReceiver(manager_agent);
 
         generateAgents();
 
@@ -129,23 +141,34 @@ public class ControllerAgent extends Agent {
 
         createContainerWindow();
 
+        // Send ready and Wait for go from manager
+        ACLMessage manager_ready_message = new ACLMessage(ACLMessage.INFORM);
+        manager_ready_message.setOntology("ready");
+        manager_ready_message.addReceiver(manager_agent);
+        send(manager_ready_message);
+
+        blockingReceive(MessageTemplate.and(
+                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                MessageTemplate.MatchOntology("GO")));
+
         // Initialize loop
-        loop_behavior = new TickerBehaviour(this, 100) {
+        TickerBehaviour loop_behavior = new TickerBehaviour(this, 100) {
             @Override
             protected void onTick() {
 
-                // Return if it is not running anymore
-                if (! is_running) return;
-
                 // Tracking time
                 long start_time = System.currentTimeMillis();
+
+                ACLMessage message = receive(kill_message_template);
+                if (message != null) doDelete();
 
                 // Sending go
                 send(move_go_msg);
 
                 // Receive new locations
                 String[] replies = new String[agent_count];
-                for (int i = 0; i<agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
+                for (int i = 0; i < agent_count; i++)
+                    replies[i] = blockingReceive(status_message_template).getContent();
 
                 if (DEBUG) {
                     System.out.println("New locations");
@@ -157,16 +180,9 @@ public class ControllerAgent extends Agent {
                 wandererEnvironmentPanel.repaint();
 
                 // Process if simulation is done
-                if (sick_agent_count == 0){
-                    is_done = true;
-                    exit_confirmation_window.setTitle("Simulation done");
-                    exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
-
-                    // Creation of exiting window
-                    exit_confirmation_window.setVisible(true);
-
-                    // Remove the ticking loop
-                    myAgent.removeBehaviour(loop_behavior);
+                if (sick_agent_count == 0) {
+                    done_message.setContent("container done");
+                    send(done_message);
                 }
 
                 // Tracking time end
@@ -232,6 +248,7 @@ public class ControllerAgent extends Agent {
 
     @Override
     public void doDelete() {
+
         // Sending auto-destruct signal to wanderers
         move_go_msg.setContent("delete");
         send(move_go_msg);
@@ -245,8 +262,9 @@ public class ControllerAgent extends Agent {
         if (confirmations != agent_count) System.out.println("Not all agents have been deleted");
         agent_count = 0;
 
-        // Deleting container window
+        // Deleting windows
         container_frame.dispose();
+        exit_confirmation_window.dispose();
 
         // Kill container
         try {
@@ -255,6 +273,7 @@ public class ControllerAgent extends Agent {
             throw new RuntimeException(e);
         }
 
+        System.out.println("Finishing deleting container-" + container_id);
         super.doDelete();
     }
 
@@ -335,14 +354,14 @@ public class ControllerAgent extends Agent {
         JButton stay_button = new JButton("Stay");
         stay_button.addActionListener(e -> {
             exit_confirmation_window.setVisible(false);
-            is_running = true;
         });
         exit_confirmation_window.add(stay_button);
 
         JButton exit_button = new JButton("Exit simulation");
         exit_button.addActionListener(e -> {
-            exit_confirmation_window.dispose();
-            doDelete();
+            exit_confirmation_window.setVisible(false);
+            done_message.setContent("force");
+            send(done_message);
         });
         exit_confirmation_window.add(exit_button);
 
@@ -398,11 +417,6 @@ public class ControllerAgent extends Agent {
 
             @Override
             public void windowClosing(WindowEvent e) {
-                if(is_done) {
-                    doDelete();
-                    return;
-                }
-                is_running = false;
                 exit_confirmation_window.setVisible(true);
             }
 
