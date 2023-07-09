@@ -4,7 +4,6 @@ import jade.core.AID;
 import jade.core.Agent;
 import jade.core.ProfileImpl;
 import jade.core.Runtime;
-import jade.core.behaviours.CyclicBehaviour;
 import jade.wrapper.AgentContainer;
 import jade.core.behaviours.TickerBehaviour;
 import jade.domain.DFService;
@@ -48,7 +47,6 @@ public class ControllerAgent extends Agent {
     private AgentStatus[] agent_statuses;
 
     private AgentContainer ac;
-    private DFAgentDescription dfd;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
@@ -66,7 +64,6 @@ public class ControllerAgent extends Agent {
     private JFrame container_frame;
     private WandererEnvironmentPanel wandererEnvironmentPanel;
     private JFrame exit_confirmation_window;
-    private JLabel exit_confirmation_info;
 
     @Override
     protected void setup() {
@@ -94,7 +91,7 @@ public class ControllerAgent extends Agent {
 
         // Registering to the Wanderer group service
         try {
-            dfd = new DFAgentDescription();
+            DFAgentDescription dfd = new DFAgentDescription();
             dfd.setName(getAID());
             ServiceDescription sd = new ServiceDescription();
             sd.setType("controller-group");
@@ -347,7 +344,7 @@ public class ControllerAgent extends Agent {
         exit_confirmation_window.setTitle("Simulation still running");
         exit_confirmation_window.setLayout(new FlowLayout(FlowLayout.CENTER,10,10));
 
-        exit_confirmation_info = new JLabel("The simulation is still running, stay or stop simulation:");
+        JLabel exit_confirmation_info = new JLabel("The simulation is still running, stay or stop simulation:");
         exit_confirmation_window.add(exit_confirmation_info);
 
         JButton stay_button = new JButton("Stay");
