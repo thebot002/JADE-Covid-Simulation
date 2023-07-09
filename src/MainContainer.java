@@ -13,6 +13,7 @@ public class MainContainer {
             Runtime runtime = Runtime.instance();
             Properties properties = new ExtendedProperties();
             properties.setProperty(Profile.GUI, "true");
+            properties.setProperty("jade_domain_df_autocleanup", "true");
             ProfileImpl pc = new ProfileImpl(properties);
 
             AgentContainer mc = runtime.createMainContainer(pc);

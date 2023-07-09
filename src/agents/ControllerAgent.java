@@ -248,7 +248,6 @@ public class ControllerAgent extends Agent {
 
     @Override
     public void doDelete() {
-
         // Sending auto-destruct signal to wanderers
         move_go_msg.setContent("delete");
         send(move_go_msg);

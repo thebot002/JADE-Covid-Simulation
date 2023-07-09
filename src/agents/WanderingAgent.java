@@ -260,14 +260,4 @@ public class WanderingAgent extends Agent {
 
         return null;
     }
-
-    @Override
-    public void doDelete() {
-//        try {
-//            DFService.deregister(this,dfd);
-//        } catch (FIPAException e) {
-//            throw new RuntimeException(e);
-//        }
-        super.doDelete();
-    }
 }
