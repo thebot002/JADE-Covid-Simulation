@@ -11,10 +11,15 @@ import jade.wrapper.AgentController;
 import javax.swing.*;
 import javax.swing.border.Border;
 import java.awt.*;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 import static java.lang.Thread.sleep;
 
 public class ManagerAgent extends Agent {
+
+    // This agent
+    Agent this_agent;
 
     // default variables
     private int container_count = 2;
@@ -27,6 +32,18 @@ public class ManagerAgent extends Agent {
     private int min_contamination_length = 20;
     private int max_contamination_length = 30;
 
+    // variable fields
+    private JTextField
+            containerCountInput,
+            remoteContainerCountInput,
+            agentCountInput,
+            sickCountInput,
+            agentSpeedInput,
+            contaminationRadiusInput,
+            contaminationProbInput,
+            minContaminationLengthInput,
+            maxContaminationLengthInput;
+
     // containers
     AgentContainer[] spawned_containers;
     AID[] controller_agents;
@@ -36,6 +53,11 @@ public class ManagerAgent extends Agent {
 
     @Override
     protected void setup() {
+        this_agent = this;
+        createMenuWindow();
+    }
+
+    private void createMenuWindow(){
         JFrame frame = new JFrame();
         frame.setTitle("COVID Sim - Menu");
         frame.setLocation(100,100);
@@ -52,121 +74,55 @@ public class ManagerAgent extends Agent {
 
         // Container count
         options.add(new Label("Container count:"));
-        JTextField containerCountInput = new JTextField(Integer.toString(container_count));
+        containerCountInput = new JTextField(Integer.toString(container_count));
         options.add(containerCountInput);
 
         // Remote container count
         options.add(new Label("Remote container count:"));
-        JTextField remoteContainerCountInput = new JTextField(Integer.toString(remote_container_count));
+        remoteContainerCountInput = new JTextField(Integer.toString(remote_container_count));
         options.add(remoteContainerCountInput);
 
         // Agent count
         options.add(new Label("Agent count:"));
-        JTextField agentCountInput = new JTextField(Integer.toString(agent_count));
+        agentCountInput = new JTextField(Integer.toString(agent_count));
         options.add(agentCountInput);
 
         // Initial sick count
         options.add(new Label("Start Sick count:"));
-        JTextField sickCountInput = new JTextField(Integer.toString(init_sick));
+        sickCountInput = new JTextField(Integer.toString(init_sick));
         options.add(sickCountInput);
 
         // Agent speed
         options.add(new Label("Agent speed:"));
-        JTextField agentSpeedInput = new JTextField(Double.toString((agent_speed)));
+        agentSpeedInput = new JTextField(Double.toString((agent_speed)));
         options.add(agentSpeedInput);
 
         // Contamination radius
         options.add(new Label("Contamination radius:"));
-        JTextField contaminationRadiusInput = new JTextField(Integer.toString(contamination_radius));
+        contaminationRadiusInput = new JTextField(Integer.toString(contamination_radius));
         options.add(contaminationRadiusInput);
 
         // Contamination prob
         options.add(new Label("Contamination probability:"));
-        JTextField contaminationProbInput = new JTextField(Double.toString(contamination_prob));
+        contaminationProbInput = new JTextField(Double.toString(contamination_prob));
         options.add(contaminationProbInput);
 
         // Min contamination length
         options.add(new Label("Min Contamination Length:"));
-        JTextField minContaminationLengthInput = new JTextField(Integer.toString(min_contamination_length));
+        minContaminationLengthInput = new JTextField(Integer.toString(min_contamination_length));
         options.add(minContaminationLengthInput);
 
         // Max contamination length
         options.add(new Label("Max Contamination Length:"));
-        JTextField maxContaminationLengthInput = new JTextField(Integer.toString(max_contamination_length));
+        maxContaminationLengthInput = new JTextField(Integer.toString(max_contamination_length));
         options.add(maxContaminationLengthInput);
-
 
         // Grid setup
         options.setLayout(new GridLayout(9,2));
 
         // Start button
         JButton startButton = new JButton("Start simulation");
-        startButton.addActionListener(e -> {
-            container_count = Integer.parseInt(containerCountInput.getText());
-            remote_container_count = Integer.parseInt(remoteContainerCountInput.getText());
-            agent_count = Integer.parseInt(agentCountInput.getText());
-            init_sick = Integer.parseInt(sickCountInput.getText());
-            agent_speed = Double.parseDouble(agentSpeedInput.getText());
-            contamination_radius = Integer.parseInt(contaminationRadiusInput.getText());
-            contamination_prob = Double.parseDouble(contaminationProbInput.getText());
-            min_contamination_length = Integer.parseInt(minContaminationLengthInput.getText());
-            max_contamination_length = Integer.parseInt(maxContaminationLengthInput.getText());
-
-            if (container_count <= 0
-                    || remote_container_count < 0
-                    || agent_count <= 0
-                    || init_sick <= 0
-                    || agent_speed <= 0
-                    || contamination_radius <= 0
-                    || min_contamination_length < 0
-                    || max_contamination_length <= 0){
-                System.out.println("None of the inputs can be negative");
-                return;
-            }
-
-            if (remote_container_count > container_count){
-                System.out.println("Can't have more remote containers than total ones");
-                return;
-            }
-
-            if (init_sick >= agent_count){
-                System.out.println("init sick amount can't be larger than agent count");
-                return;
-            }
-
-            if (max_contamination_length < min_contamination_length){
-                System.out.println("max contamination length can't be larger than min contamination length");
-                return;
-            }
-
-            createSubContainer();
-
-            try {
-                sleep(1000);
-            } catch (InterruptedException ex) {
-                throw new RuntimeException(ex);
-            }
-
-            // Find the list of controller agents
-            DFAgentDescription template = new DFAgentDescription();
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType("controller-group");
-            template.addServices(sd);
-            try {
-                DFAgentDescription[] result = DFService.search(this, template);
-                controller_agents = new AID[container_count];
-                for (int i = 0; i < container_count; i++) controller_agents[i] = result[i].getName();
-
-                if (DEBUG) {
-                    System.out.println("Found the following controller agents:");
-                    for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
-                }
-            }
-            catch (FIPAException fe) {
-                fe.printStackTrace();
-            }
-
-        });
+        startButton.addActionListener(new StartAction());
 
         // Frame components in a column layout
         contentFrame.setLayout(new BorderLayout(20,20));
@@ -180,6 +136,78 @@ public class ManagerAgent extends Agent {
         frame.setVisible(true);
         frame.setResizable(false);
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+    }
+
+    private class StartAction implements ActionListener {
+
+        @Override
+        public void actionPerformed(ActionEvent e) {
+            container_count = Integer.parseInt(containerCountInput.getText());
+            remote_container_count = Integer.parseInt(remoteContainerCountInput.getText());
+            agent_count = Integer.parseInt(agentCountInput.getText());
+            init_sick = Integer.parseInt(sickCountInput.getText());
+            agent_speed = Double.parseDouble(agentSpeedInput.getText());
+            contamination_radius = Integer.parseInt(contaminationRadiusInput.getText());
+            contamination_prob = Double.parseDouble(contaminationProbInput.getText());
+            min_contamination_length = Integer.parseInt(minContaminationLengthInput.getText());
+            max_contamination_length = Integer.parseInt(maxContaminationLengthInput.getText());
+
+            if(!validateInputs()) return;
+
+            createSubContainer();
+
+            try {sleep(1000);} catch (InterruptedException ex) { throw new RuntimeException(ex); }
+
+            // Find the list of controller agents
+            DFAgentDescription template = new DFAgentDescription();
+            ServiceDescription sd = new ServiceDescription();
+            sd.setType("controller-group");
+            template.addServices(sd);
+            try {
+                DFAgentDescription[] result = DFService.search(this_agent, template);
+                controller_agents = new AID[container_count];
+                for (int i = 0; i < container_count; i++) controller_agents[i] = result[i].getName();
+
+                if (DEBUG) {
+                    System.out.println("Found the following controller agents:");
+                    for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
+                }
+            }
+            catch (FIPAException fe) {
+                fe.printStackTrace();
+            }
+        }
+    }
+
+    private boolean validateInputs(){
+        if (container_count <= 0
+                || remote_container_count < 0
+                || agent_count <= 0
+                || init_sick <= 0
+                || agent_speed <= 0
+                || contamination_radius <= 0
+                || min_contamination_length < 0
+                || max_contamination_length <= 0){
+            System.out.println("None of the inputs can be negative");
+            return false;
+        }
+
+        if (remote_container_count > container_count){
+            System.out.println("Can't have more remote containers than total ones");
+            return false;
+        }
+
+        if (init_sick >= agent_count){
+            System.out.println("init sick amount can't be larger than agent count");
+            return false;
+        }
+
+        if (max_contamination_length < min_contamination_length){
+            System.out.println("max contamination length can't be larger than min contamination length");
+            return false;
+        }
+
+        return true;
     }
 
     private void createSubContainer(){
