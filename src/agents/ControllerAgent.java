@@ -2,6 +2,8 @@ package agents;
 
 import jade.core.AID;
 import jade.core.Agent;
+import jade.core.ProfileImpl;
+import jade.core.Runtime;
 import jade.wrapper.AgentContainer;
 import jade.core.behaviours.TickerBehaviour;
 import jade.domain.DFService;
@@ -11,6 +13,7 @@ import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentController;
+import jade.wrapper.ControllerException;
 import jade.wrapper.StaleProxyException;
 
 import javax.swing.*;
@@ -36,6 +39,7 @@ public class ControllerAgent extends Agent {
     private final boolean DEBUG = false;
 
     private int agent_count;
+    private AgentContainer ac;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
@@ -91,7 +95,13 @@ public class ControllerAgent extends Agent {
         }
 
         // Generation of agents
-        AgentContainer ac = getContainerController();
+        Runtime runtime = Runtime.instance();
+        ProfileImpl pc = new ProfileImpl(false);
+        pc.setParameter(ProfileImpl.CONTAINER_NAME, "Container-"+(container_id));
+        pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
+
+        ac = runtime.createAgentContainer(pc);
+        try {ac.start();} catch (ControllerException e) {throw new RuntimeException(e);}
 
         // Choosing sick agents
         sick_agent_count = init_sick;
@@ -391,6 +401,13 @@ public class ControllerAgent extends Agent {
 
         // Deleting container window
         container_frame.dispose();
+
+        // Kill container
+        try {
+            ac.kill();
+        } catch (StaleProxyException e) {
+            throw new RuntimeException(e);
+        }
 
         super.doDelete();
     }

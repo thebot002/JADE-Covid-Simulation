@@ -1,9 +1,6 @@
 package agents;
 
-import jade.core.AID;
-import jade.core.Agent;
-import jade.core.ProfileImpl;
-import jade.core.Runtime;
+import jade.core.*;
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
 import jade.domain.FIPAAgentManagement.ServiceDescription;
@@ -21,6 +18,7 @@ public class ManagerAgent extends Agent {
 
     // default variables
     private int container_count = 2;
+    private int remote_container_count = 0;
     private int agent_count = 100;
     private int init_sick = 10;
     private double agent_speed = 1.0;
@@ -52,10 +50,15 @@ public class ManagerAgent extends Agent {
         // Options pannel
         JPanel options = new JPanel();
 
-        // Agent count
+        // Container count
         options.add(new Label("Container count:"));
         JTextField containerCountInput = new JTextField(Integer.toString(container_count));
         options.add(containerCountInput);
+
+        // Remote container count
+        options.add(new Label("Remote container count:"));
+        JTextField remoteContainerCountInput = new JTextField(Integer.toString(remote_container_count));
+        options.add(remoteContainerCountInput);
 
         // Agent count
         options.add(new Label("Agent count:"));
@@ -94,12 +97,13 @@ public class ManagerAgent extends Agent {
 
 
         // Grid setup
-        options.setLayout(new GridLayout(8,2));
+        options.setLayout(new GridLayout(9,2));
 
         // Start button
         JButton startButton = new JButton("Start simulation");
         startButton.addActionListener(e -> {
             container_count = Integer.parseInt(containerCountInput.getText());
+            remote_container_count = Integer.parseInt(remoteContainerCountInput.getText());
             agent_count = Integer.parseInt(agentCountInput.getText());
             init_sick = Integer.parseInt(sickCountInput.getText());
             agent_speed = Double.parseDouble(agentSpeedInput.getText());
@@ -107,6 +111,23 @@ public class ManagerAgent extends Agent {
             contamination_prob = Double.parseDouble(contaminationProbInput.getText());
             min_contamination_length = Integer.parseInt(minContaminationLengthInput.getText());
             max_contamination_length = Integer.parseInt(maxContaminationLengthInput.getText());
+
+            if (container_count <= 0
+                    || remote_container_count < 0
+                    || agent_count <= 0
+                    || init_sick <= 0
+                    || agent_speed <= 0
+                    || contamination_radius <= 0
+                    || min_contamination_length < 0
+                    || max_contamination_length <= 0){
+                System.out.println("None of the inputs can be negative");
+                return;
+            }
+
+            if (remote_container_count > container_count){
+                System.out.println("Can't have more remote containers than total ones");
+                return;
+            }
 
             if (init_sick >= agent_count){
                 System.out.println("init sick amount can't be larger than agent count");
@@ -126,7 +147,7 @@ public class ManagerAgent extends Agent {
                 throw new RuntimeException(ex);
             }
 
-            // Find the list of wandering agents
+            // Find the list of controller agents
             DFAgentDescription template = new DFAgentDescription();
             ServiceDescription sd = new ServiceDescription();
             sd.setType("controller-group");
@@ -134,7 +155,7 @@ public class ManagerAgent extends Agent {
             try {
                 DFAgentDescription[] result = DFService.search(this, template);
                 controller_agents = new AID[container_count];
-                for (int i = 0; i<container_count; ++i) controller_agents[i] = result[i].getName();
+                for (int i = 0; i < container_count; i++) controller_agents[i] = result[i].getName();
 
                 if (DEBUG) {
                     System.out.println("Found the following controller agents:");
@@ -165,38 +186,100 @@ public class ManagerAgent extends Agent {
 
         spawned_containers = new AgentContainer[container_count];
 
+        int container_id;
+        String container_name;
+
         for (int i = 0; i < container_count; i++) {
 
-            // Sub container
-            int container_id = i+1;
-            String container_name = "Container-" + container_id;
+            if (i < agent_count-remote_container_count) {
+                // Local container
+                container_id = i + 1;
+                container_name = "Container-" + container_id;
 
 
-            try {
-                Runtime runtime = Runtime.instance();
-                ProfileImpl pc = new ProfileImpl(false);
-                pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
-                pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
-                AgentContainer ac = runtime.createAgentContainer(pc);
-                spawned_containers[i] = ac;
-                ac.start();
+                try {
+                    AgentContainer mc = getContainerController();
 
-                // Creating the controller
-                Object[] controller_arguments = new Object[]{
-                        container_id,
-                        agent_count,
-                        init_sick,
-                        agent_speed,
-                        contamination_radius,
-                        contamination_prob,
-                        min_contamination_length,
-                        max_contamination_length
-                };
-                AgentController controllerAgent = ac.createNewAgent("Controller-"+(i+1), "agents.ControllerAgent", controller_arguments);
-                controllerAgent.start();
+                    // Creating the controller
+                    Object[] controller_arguments = new Object[]{
+                            container_id,
+                            agent_count,
+                            init_sick,
+                            agent_speed,
+                            contamination_radius,
+                            contamination_prob,
+                            min_contamination_length,
+                            max_contamination_length
+                    };
+                    AgentController controllerAgent = mc.createNewAgent("Controller-" + (i + 1), "agents.ControllerAgent", controller_arguments);
+                    controllerAgent.start();
 
-            } catch (Exception e) {
-                e.printStackTrace();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            else {
+                // Remote containers
+                container_id = i + 1 - remote_container_count;
+                container_name = "Container-" + container_id;
+
+                // Creation of remote container
+
+//        String user = "jade_creator";
+//        String password = "Potato";
+//        String host = "192.168.68.124";
+//        int port = 22;
+//
+//        try {
+//            JSch jsch = new JSch();
+//            Session session = jsch.getSession(user, host, port);
+//            session.setPassword(password);
+//            session.setConfig("StrictHostKeyChecking", "no");
+//            System.out.println("Establishing Connection...");
+//            session.connect();
+//            System.out.println("Connection established.");
+//
+//            Channel channel=session.openChannel("exec");
+//            String container_name = "rpi-container";
+//            String command = "cd jade_project; java -cp jade.jar: LaunchContainer " + container_name;
+//            ((ChannelExec)channel).setCommand(command);
+//
+//            // X Forwarding
+//            // channel.setXForwarding(true);
+//
+//            //channel.setInputStream(System.in);
+//            channel.setInputStream(null);
+//
+//            //channel.setOutputStream(System.out);
+//
+//            //FileOutputStream fos=new FileOutputStream("/tmp/stderr");
+//            //((ChannelExec)channel).setErrStream(fos);
+//            ((ChannelExec)channel).setErrStream(System.err);
+//
+//            InputStream in=channel.getInputStream();
+//
+//            channel.connect();
+//
+//            byte[] tmp=new byte[1024];
+//            while(true){
+//                while(in.available()>0){
+//                    int i=in.read(tmp, 0, 1024);
+//                    if(i<0)break;
+//                    System.out.print(new String(tmp, 0, i));
+//                }
+//                if(channel.isClosed()){
+//                    if(in.available()>0) continue;
+//                    System.out.println("exit-status: "+channel.getExitStatus());
+//                    break;
+//                }
+//                try{Thread.sleep(1000);}catch(Exception ee){}
+//            }
+//
+//        } catch (JSchException e) {
+//            e.printStackTrace();
+//        } catch (IOException e) {
+//            throw new RuntimeException(e);
+//        }
             }
         }
     }
