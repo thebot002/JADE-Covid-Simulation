@@ -1,5 +1,8 @@
 package agents;
 
+import com.jcraft.jsch.*;
+import com.jcraft.jsch.Channel;
+
 import jade.core.*;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.domain.DFService;
@@ -8,6 +11,7 @@ import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
+import jade.util.leap.ArrayList;
 import jade.wrapper.AgentContainer;
 import jade.wrapper.AgentController;
 
@@ -16,6 +20,10 @@ import javax.swing.border.Border;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
+import java.io.InputStream;
+import java.io.IOException;
+import java.util.Objects;
 
 import static java.lang.Thread.sleep;
 
@@ -68,6 +76,10 @@ public class ManagerAgent extends Agent {
 
     // Behaviors
     private WaitDoneRequest done_request_behavior = new WaitDoneRequest();
+
+    // Remote variables
+    boolean remote_launched = false;
+    AID remote_manager;
 
     //debug
     private final boolean DEBUG = true;
@@ -259,7 +271,7 @@ public class ManagerAgent extends Agent {
 
         for (int i = 0; i < container_count; i++) {
 
-            if (i < agent_count-remote_container_count) {
+            if (i < container_count-remote_container_count) {
                 // Local container
                 container_id = i + 1;
                 container_name = "Container-" + container_id;
@@ -291,63 +303,10 @@ public class ManagerAgent extends Agent {
                 container_id = i + 1 - remote_container_count;
                 container_name = "Container-" + container_id;
 
-                // Creation of remote container
+                if (!remote_launched) launchRemote();
 
-//        String user = "jade_creator";
-//        String password = "Potato";
-//        String host = "192.168.68.124";
-//        int port = 22;
-//
-//        try {
-//            JSch jsch = new JSch();
-//            Session session = jsch.getSession(user, host, port);
-//            session.setPassword(password);
-//            session.setConfig("StrictHostKeyChecking", "no");
-//            System.out.println("Establishing Connection...");
-//            session.connect();
-//            System.out.println("Connection established.");
-//
-//            Channel channel=session.openChannel("exec");
-//            String container_name = "rpi-container";
-//            String command = "cd jade_project; java -cp jade.jar: LaunchContainer " + container_name;
-//            ((ChannelExec)channel).setCommand(command);
-//
-//            // X Forwarding
-//            // channel.setXForwarding(true);
-//
-//            //channel.setInputStream(System.in);
-//            channel.setInputStream(null);
-//
-//            //channel.setOutputStream(System.out);
-//
-//            //FileOutputStream fos=new FileOutputStream("/tmp/stderr");
-//            //((ChannelExec)channel).setErrStream(fos);
-//            ((ChannelExec)channel).setErrStream(System.err);
-//
-//            InputStream in=channel.getInputStream();
-//
-//            channel.connect();
-//
-//            byte[] tmp=new byte[1024];
-//            while(true){
-//                while(in.available()>0){
-//                    int i=in.read(tmp, 0, 1024);
-//                    if(i<0)break;
-//                    System.out.print(new String(tmp, 0, i));
-//                }
-//                if(channel.isClosed()){
-//                    if(in.available()>0) continue;
-//                    System.out.println("exit-status: "+channel.getExitStatus());
-//                    break;
-//                }
-//                try{Thread.sleep(1000);}catch(Exception ee){}
-//            }
-//
-//        } catch (JSchException e) {
-//            e.printStackTrace();
-//        } catch (IOException e) {
-//            throw new RuntimeException(e);
-//        }
+                // Send signal to remote manager to create containers
+
             }
         }
     }
@@ -385,13 +344,9 @@ public class ManagerAgent extends Agent {
         public void action() {
             String message = blockingReceive(done_message_template).getContent();
             switch (message) {
-                case "container done" -> done_containers += 1;
-                case "force" -> {
-                    System.out.println("Force deletion");
-                    deleteContainers();
-                    return;
-                }
-                case "container back" -> done_containers -= 1;
+                case "container done": done_containers += 1; break;
+                case "force": System.out.println("Force deletion"); deleteContainers(); return;
+                case "container back": done_containers -= 1; break;
             }
 
             // Handle end of process
@@ -408,5 +363,118 @@ public class ManagerAgent extends Agent {
         kill_message.setOntology("kill");
         for (AID controller: controller_agents) kill_message.addReceiver(controller);
         send(kill_message);
+    }
+
+    private void launchRemote() {
+        String user = "jade_creator";
+        String password = "Potato";
+        String host = "192.168.68.124";
+        int port = 22;
+
+        try {
+
+            // Setup connection
+            JSch jsch = new JSch();
+            Session session = jsch.getSession(user, host, port);
+            session.setPassword(password);
+            session.setConfig("StrictHostKeyChecking", "no");
+            System.out.println("Establishing Connection to Remote...");
+            session.connect();
+            System.out.println("Remote Connection established.");
+
+            // SFTP to transfer files
+            ChannelSftp channelSftp = (ChannelSftp) session.openChannel("sftp");
+            channelSftp.connect(5000);
+
+            String[] files = listFiles("./src");
+            String remoteRoot = "/home/jade_creator/jade_project/";
+            for (String file: files) {
+                System.out.println("[Upload to Remote] " + file + " -> " + remoteRoot + file.substring(2));
+                channelSftp.put(file, remoteRoot + file.substring(2));
+            }
+
+            channelSftp.disconnect();
+
+            // Sending launch command
+            System.out.println("Sending launch command to Remote");
+            ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
+            channelExec.setCommand("cd jade_project; javac -cp ./lib/jade.jar:./lib/jsch-0.1.55.jar -d ./out/ ./src/*.java ./src/agents/*.java && java -cp ./lib/jade.jar:./lib/jsch-0.1.55.jar:./out LaunchRemote");
+
+            channelExec.setXForwarding(true);
+            channelExec.setInputStream(null);
+            channelExec.setErrStream(System.err);
+
+            InputStream in=channelExec.getInputStream();
+
+            channelExec.connect(5000);
+
+            // TODO: print in cyclic loop
+            byte[] tmp=new byte[1024];
+            while(true){
+                while(in.available()>0){
+                    int i=in.read(tmp, 0, 1024);
+                    if(i<0)break;
+                    System.out.print(new String(tmp, 0, i));
+                }
+                if(channelExec.isClosed()){
+                    if(in.available()>0) continue;
+                    System.out.println("exit-status: "+channelExec.getExitStatus());
+                    break;
+                }
+                try{Thread.sleep(1000);}catch(Exception ee){}
+            }
+
+            // Wait for remote manager to settle
+
+            System.out.println("going to sleep for a second");
+            sleep(1000);
+
+            // Find the remote manager agents
+            DFAgentDescription template = new DFAgentDescription();
+            ServiceDescription sd = new ServiceDescription();
+            sd.setType("remote-manager");
+            template.addServices(sd);
+
+            DFAgentDescription[] result;
+            do {
+                result = DFService.search(this_agent, template);
+            } while (result.length == 0);
+            System.out.println("Remote manager settled and retrieved");
+            remote_manager = result[0].getName();
+
+            // Send intro
+            System.out.println("sending intro to remote");
+            ACLMessage intro_message = new ACLMessage(ACLMessage.INFORM);
+            intro_message.setOntology("intro");
+            intro_message.addReceiver(remote_manager);
+            send(intro_message);
+
+        } catch (JSchException | FIPAException e) {
+            e.printStackTrace();
+        } catch (InterruptedException | SftpException e) {
+            throw new RuntimeException(e);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String[] listFiles(String src_folder){
+        File folder = new File(src_folder);
+        File[] listOfFiles = folder.listFiles();
+
+        ArrayList result = new ArrayList();
+
+        for (int i = 0; i < Objects.requireNonNull(listOfFiles).length; i++) {
+            if (listOfFiles[i].isFile()) {
+                result.add(src_folder + "/" + listOfFiles[i].getName());
+            } else if (listOfFiles[i].isDirectory()) {
+                String[] result_directory = listFiles(src_folder + "/" + listOfFiles[i].getName());
+                for (String res: result_directory) result.add(res);
+            }
+        }
+
+        String[] array_result = new String[result.size()];
+        for (int i = 0; i < result.size(); i++) array_result[i] = (String) result.get(i);
+        return array_result;
     }
 }

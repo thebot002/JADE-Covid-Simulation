@@ -6,27 +6,33 @@ public enum AgentStatus {
     HEALTHY, SICK, RECOVERED;
 
     public static AgentStatus fromString(String str){
-        return switch (str) {
-            case "healthy" -> HEALTHY;
-            case "sick" -> SICK;
-            case "recovered" -> RECOVERED;
-            default -> throw new IllegalStateException("Unexpected value: " + str);
-        };
+        AgentStatus status = null;
+        switch (str) {
+            case "healthy": status = HEALTHY; break;
+            case "sick": status = SICK; break;
+            case "recovered": status = RECOVERED; break;
+            default: throw new IllegalStateException("Unexpected value: " + str);
+        }
+        return status;
     }
 
     public String toString(){
-        return switch (this) {
-            case HEALTHY -> "healthy";
-            case SICK -> "sick";
-            case RECOVERED -> "recovered";
-        };
+        String status = null;
+        switch (this) {
+            case HEALTHY: status="healthy"; break;
+            case SICK: status="sick"; break;
+            case RECOVERED: status= "recovered"; break;
+        }
+        return status;
     }
 
     public Color color(){
-        return switch (this){
-            case HEALTHY -> Color.BLUE;
-            case SICK -> Color.RED;
-            case RECOVERED -> Color.GRAY;
-        };
+        Color c = null;
+        switch (this){
+            case HEALTHY: c = Color.BLUE; break;
+            case SICK: c = Color.RED; break;
+            case RECOVERED: c = Color.GRAY; break;
+        }
+        return c;
     }
 }

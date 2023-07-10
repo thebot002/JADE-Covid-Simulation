@@ -81,8 +81,8 @@ public class WanderingAgent extends Agent {
 
         // Define initial position
         Random rand = new Random();
-        double init_x = rand.nextDouble(0.1,0.9) * this.MAX_X;
-        double init_y = rand.nextDouble(0.1,0.9) * this.MAX_Y;
+        double init_x = (0.1 + (0.8 * rand.nextDouble())) * this.MAX_X; // between 10 and 90 to not spawn on edge
+        double init_y = (0.1 + (0.8 * rand.nextDouble())) * this.MAX_Y; // between 10 and 90 to not spawn on edge
         this.position = new double[]{init_x, init_y};
 
         // Define initial heading

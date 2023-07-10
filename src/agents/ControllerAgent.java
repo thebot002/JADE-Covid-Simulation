@@ -89,7 +89,7 @@ public class ControllerAgent extends Agent {
         agent_positions = new double[agent_count][2];
         agent_statuses = new AgentStatus[agent_count];
 
-        // Registering to the Wanderer group service
+        // Registering to the Controller group service
         try {
             DFAgentDescription dfd = new DFAgentDescription();
             dfd.setName(getAID());
