@@ -359,7 +359,6 @@ public class ManagerAgent extends Agent {
 
             // Handle end of process
             if (done_containers == container_count){
-                System.out.println("here");
                 exit_confirmation_window.setTitle("Simulation done");
                 exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
                 exit_confirmation_window.setVisible(true);

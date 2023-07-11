@@ -177,10 +177,8 @@ public class ControllerAgent extends Agent {
                 }
 
                 // Redraw container frame
-                if (gui_enabled) {
-                    processReplies(replies);
-                    wandererEnvironmentPanel.repaint();
-                }
+                processReplies(replies);
+                if (gui_enabled)wandererEnvironmentPanel.repaint();
 
                 // Process if simulation is done
                 if (!sent_done && sick_agent_count == 0) {
@@ -193,7 +191,7 @@ public class ControllerAgent extends Agent {
                 long duration_s = System.currentTimeMillis() - start_time;
                 if (DEBUG) System.out.println("[" + container_name + "] Iteration done in (ms): " + duration_s);
 
-                if (!sent_done) System.out.println("[" + container_name + "] " + sick_agent_count);
+                if (DEBUG && !sent_done) System.out.println("[" + container_name + "] " + sick_agent_count);
             }
         };
 
