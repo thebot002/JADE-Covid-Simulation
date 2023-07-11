@@ -4,10 +4,6 @@ import com.jcraft.jsch.*;
 
 import jade.core.*;
 import jade.core.behaviours.CyclicBehaviour;
-import jade.domain.DFService;
-import jade.domain.FIPAAgentManagement.DFAgentDescription;
-import jade.domain.FIPAAgentManagement.ServiceDescription;
-import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.util.leap.ArrayList;
@@ -25,6 +21,8 @@ import java.io.IOException;
 import java.util.Objects;
 
 import static java.lang.Thread.sleep;
+
+import static agents.Util.*;
 
 public class ManagerAgent extends Agent {
 
@@ -69,16 +67,10 @@ public class ManagerAgent extends Agent {
     JLabel exit_confirmation_info;
 
     // Message templates
-    private final MessageTemplate done_message_template = MessageTemplate.and(
-            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-            MessageTemplate.MatchOntology("done"));
-
-    private final MessageTemplate quit_message_template = MessageTemplate.and(
-            MessageTemplate.MatchPerformative(ACLMessage.REQUEST),
-            MessageTemplate.MatchOntology("quit"));
+    private final MessageTemplate done_message_template = getMessageTemplate(ACLMessage.INFORM,"done" );
 
     // Behaviors
-    private WaitDoneRequest done_request_behavior = new WaitDoneRequest();
+    private final WaitDoneRequest done_request_behavior = new WaitDoneRequest();
 
     // Remote variables
     private boolean remote_launched = false;
@@ -209,46 +201,23 @@ public class ManagerAgent extends Agent {
             try {sleep(1000);} catch (InterruptedException ex) { throw new RuntimeException(ex); }
 
             // Find the list of controller agents
-            DFAgentDescription template = new DFAgentDescription();
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType("controller-group");
-            template.addServices(sd);
-            try {
-                DFAgentDescription[] result = DFService.search(this_agent, template);
-                controller_agents = new AID[container_count];
-                for (int i = 0; i < container_count; i++) controller_agents[i] = result[i].getName();
-
-                if (DEBUG) {
-                    System.out.println("Found the following controller agents:");
-                    for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
-                }
-            }
-            catch (FIPAException fe) {
-                fe.printStackTrace();
+            controller_agents = getAgentsAtService(this_agent, "controller-group");
+            if (DEBUG) {
+                System.out.println("Found the following controller agents:");
+                for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
             }
 
             // sending introduction to controllers
-            ACLMessage intro_message = new ACLMessage(ACLMessage.INFORM);
-            intro_message.setOntology("intro");
-            for (AID agent: controller_agents) intro_message.addReceiver(agent);
+            assert controller_agents != null;
+            ACLMessage intro_message = createMessage(ACLMessage.INFORM, "intro", controller_agents);
             send(intro_message);
 
             // Waiting for ready from all controllers
-            MessageTemplate ready_message_template = MessageTemplate.and(
-                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                    MessageTemplate.MatchOntology("ready"));
-            String[] all_containers = new String[container_count];
-            for (int i = 0; i < container_count; i++) all_containers[i] = blockingReceive(ready_message_template).getContent();
+            MessageTemplate ready_message_template = getMessageTemplate(ACLMessage.INFORM,"ready");
+            for (int i = 0; i < container_count; i++) blockingReceive(ready_message_template);
 
             // Send back go to all
-            ACLMessage go_message = new ACLMessage(ACLMessage.INFORM);
-            go_message.setOntology("GO");
-            String container_set = "";
-            for (int i = 0; i < container_count; i++) {
-                container_set += all_containers[i] + " ";
-                go_message.addReceiver(controller_agents[i]);
-            }
-            go_message.setContent(container_set.trim());
+            ACLMessage go_message = createMessage(ACLMessage.INFORM, "GO", controller_agents);
             send(go_message);
 
             this_agent.addBehaviour(done_request_behavior);
@@ -293,8 +262,8 @@ public class ManagerAgent extends Agent {
         // Remote containers
         if (remote_container_count > 0) {
             if(!remote_launched) launchRemote();
-            ACLMessage create_containers_message = new ACLMessage(ACLMessage.INFORM);
-            create_containers_message.setOntology("container");
+            ACLMessage create_containers_message = createMessage(ACLMessage.INFORM, "container", remote_manager);
+
             String parameters = "";
             parameters += " " + agent_count;
             parameters += " " + init_sick;
@@ -306,14 +275,11 @@ public class ManagerAgent extends Agent {
             parameters += " " + travel_chance;
             parameters += " " + average_travel_duration;
             create_containers_message.setContent("create " + remote_container_count + parameters);
-            create_containers_message.addReceiver(remote_manager);
             System.out.println("Sending create container signal");
             send(create_containers_message);
 
             // Waiting for confirmation
-            blockingReceive(MessageTemplate.and(
-                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                    MessageTemplate.MatchOntology("confirm_created")));
+            blockingReceive(getMessageTemplate(ACLMessage.INFORM, "confirm_created"));
         }
 
         // Local containers
@@ -378,8 +344,11 @@ public class ManagerAgent extends Agent {
 
         @Override
         public void action() {
-            String message = blockingReceive(done_message_template).getContent();
-            switch (message) {
+            ACLMessage message = blockingReceive(done_message_template);
+            if (message == null) return;
+
+            String message_content = message.getContent();
+            switch (message_content) {
                 case "container done": done_containers += 1; break;
                 case "force": System.out.println("Force deletion"); deleteContainers(); return;
                 case "container back": done_containers -= 1; break;
@@ -395,9 +364,7 @@ public class ManagerAgent extends Agent {
     }
 
     private void deleteContainers() {
-        ACLMessage kill_message = new ACLMessage(ACLMessage.INFORM);
-        kill_message.setOntology("kill");
-        for (AID controller: controller_agents) kill_message.addReceiver(controller);
+        ACLMessage kill_message = createMessage(ACLMessage.INFORM, "kill", controller_agents);
         send(kill_message);
     }
 
@@ -473,32 +440,19 @@ public class ManagerAgent extends Agent {
             sleep(1000);
 
             // Find the remote manager agents
-            DFAgentDescription template = new DFAgentDescription();
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType("remote-manager");
-            template.addServices(sd);
-
-            DFAgentDescription[] result;
-            do {
-                result = DFService.search(this_agent, template);
-            } while (result.length == 0);
-            remote_manager = result[0].getName();
+            remote_manager = Objects.requireNonNull(getAgentsAtService(this, "remote-manager"))[0];
 
             // Send intro
-            ACLMessage intro_message = new ACLMessage(ACLMessage.INFORM);
-            intro_message.setOntology("intro");
-            intro_message.addReceiver(remote_manager);
+            ACLMessage intro_message = createMessage(ACLMessage.INFORM, "intro", remote_manager);
             send(intro_message);
 
-            blockingReceive(MessageTemplate.and(
-                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                    MessageTemplate.MatchOntology("ready")));
+            blockingReceive(getMessageTemplate(ACLMessage.INFORM, "ready"));
             System.out.println("Received ready from remote manager");
 
             // finalization
             remote_launched = true;
 
-        } catch (JSchException | FIPAException e) {
+        } catch (JSchException e) {
             e.printStackTrace();
         } catch (InterruptedException | SftpException | IOException e) {
             throw new RuntimeException(e);

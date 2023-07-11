@@ -6,10 +6,6 @@ import jade.core.ProfileImpl;
 import jade.core.Runtime;
 import jade.wrapper.AgentContainer;
 import jade.core.behaviours.TickerBehaviour;
-import jade.domain.DFService;
-import jade.domain.FIPAAgentManagement.DFAgentDescription;
-import jade.domain.FIPAAgentManagement.ServiceDescription;
-import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentController;
@@ -25,6 +21,8 @@ import java.util.Objects;
 import java.util.Random;
 
 import static java.lang.Thread.sleep;
+
+import static agents.Util.*;
 
 public class ControllerAgent extends Agent {
 
@@ -52,20 +50,14 @@ public class ControllerAgent extends Agent {
 
     // containers
     private AgentContainer ac;
-    private String[] all_other_containers;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
 
-    private final MessageTemplate status_message_template = MessageTemplate.and(
-            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-            MessageTemplate.MatchOntology("status"));
-    private final MessageTemplate kill_message_template = MessageTemplate.and(
-            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-            MessageTemplate.MatchOntology("kill"));
-    private final MessageTemplate travel_request_message_template = MessageTemplate.and(
-            MessageTemplate.MatchPerformative(ACLMessage.REQUEST),
-            MessageTemplate.MatchOntology("travel"));
+    private final MessageTemplate intro_message_template = getMessageTemplate(ACLMessage.INFORM, "intro");
+    private final MessageTemplate status_message_template = getMessageTemplate(ACLMessage.INFORM, "status");
+    private final MessageTemplate kill_message_template = getMessageTemplate(ACLMessage.INFORM, "kill");
+    private final MessageTemplate travel_request_message_template = getMessageTemplate(ACLMessage.REQUEST, "travel");
     private ACLMessage move_go_msg;
     private ACLMessage done_message;
 
@@ -79,7 +71,7 @@ public class ControllerAgent extends Agent {
 
         // Retrieving initial status and parameters
         Object[] args = getArguments();
-        if (args.length < 8) {
+        if (args.length < 11) {
             System.out.println("Not enough arguments, self destruction");
             doDelete();
         }
@@ -102,36 +94,20 @@ public class ControllerAgent extends Agent {
         agent_statuses = new AgentStatus[agent_count];
 
         // Registering to the Controller group service
-        try {
-            DFAgentDescription dfd = new DFAgentDescription();
-            dfd.setName(getAID());
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType("controller-group");
-            sd.setName("Controllers");
-            dfd.addServices(sd);
-            DFService.register(this, dfd);
-        }
-        catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        registerAgentAtService(this, "controller-group");
 
         // Waiting for introduction from manager
-        ACLMessage manager_intro_message = blockingReceive(MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("intro")));
+        ACLMessage manager_intro_message = blockingReceive(intro_message_template);
         AID manager_agent = manager_intro_message.getSender();
 
         // Create done message to manager
-        done_message = new ACLMessage(ACLMessage.INFORM);
-        done_message.setOntology("done");
-        done_message.addReceiver(manager_agent);
+        done_message = createMessage(ACLMessage.INFORM, "done", manager_agent);
 
+        // GENERATION OF WANDERER AGENTS
         generateAgents();
 
         // Inform agents that controller is ready
-        ACLMessage ready_message = new ACLMessage(ACLMessage.INFORM);
-        ready_message.setOntology("ready");
-        for (AID agent: wanderer_agents) ready_message.addReceiver(agent);
+        ACLMessage ready_message = createMessage(ACLMessage.INFORM, "ready", wanderer_agents);
         send(ready_message);
 
         // Receive initial locations back
@@ -142,35 +118,21 @@ public class ControllerAgent extends Agent {
         processReplies(replies);
 
         // Setup move go message
-        move_go_msg = new ACLMessage(ACLMessage.INFORM);
-        move_go_msg.setOntology("GO");
-        for (AID agent: wanderer_agents) move_go_msg.addReceiver(agent);
+        move_go_msg = createMessage(ACLMessage.INFORM, "GO", wanderer_agents);
 
+        // Create graphical elements
         if (gui_enabled) {
             createExitConfirmationWindow();
             createContainerWindow();
         }
 
         // Send ready and Wait for go from manager
-        ACLMessage manager_ready_message = new ACLMessage(ACLMessage.INFORM);
-        manager_ready_message.setOntology("ready");
+        ACLMessage manager_ready_message = createMessage(ACLMessage.INFORM, "ready", manager_agent);
         manager_ready_message.setContent(container_name);
-        manager_ready_message.addReceiver(manager_agent);
         send(manager_ready_message);
 
-        ACLMessage go_message = blockingReceive(MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("GO")));
-        String[] all_containers = go_message.getContent().split(" ");
+        blockingReceive(getMessageTemplate(ACLMessage.INFORM, "GO"));
 
-        all_other_containers = new String[all_containers.length - 1];
-        int index = 0;
-        for (String container: all_containers) {
-            if (!Objects.equals(container_name, container)) {
-                all_other_containers[index] = container;
-                index += 1;
-            }
-        }
         // Initialize loop
         TickerBehaviour loop_behavior = new TickerBehaviour(this, 100) {
             @Override
@@ -193,27 +155,22 @@ public class ControllerAgent extends Agent {
                     ACLMessage travel_request_message = receive(travel_request_message_template);
 
                     if (travel_request_message != null) {
-                        Random rand = new Random();
-                        int travel_container_index = rand.nextInt(all_other_containers.length);
-                        String travel_container_name = all_other_containers[travel_container_index];
+                        String action = travel_request_message.getContent();
+                        AID traveller = travel_request_message.getSender();
 
-                        ACLMessage travel_agreement_message = new ACLMessage(ACLMessage.AGREE);
-                        travel_agreement_message.setOntology("travel");
-                        travel_agreement_message.setContent(travel_container_name);
-                        travel_agreement_message.addReceiver(travel_request_message.getSender());
+                        ACLMessage travel_agreement_message = createMessage(ACLMessage.AGREE, "travel", traveller);
+
+                        if (Objects.equals(action, "leave")) {
+                            // Remove agent from the list of receivers of the go message of this controller
+                            move_go_msg.removeReceiver(traveller);
+                            agent_count--;
+                        }
+                        else if (Objects.equals(action, "arrive")) {
+                            travel_agreement_message.setContent(container_name);
+                            move_go_msg.addReceiver(traveller);
+                            agent_count++;
+                        }
                         send(travel_agreement_message);
-
-                        agent_count--;
-                        continue;
-                    }
-
-                    // Receive travelling agent
-                    ACLMessage travelling_agent_message = receive(MessageTemplate.and(
-                            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                            MessageTemplate.MatchOntology("new-agent")));
-
-                    if (travelling_agent_message != null) {
-                        agent_count++;
                         continue;
                     }
 
@@ -342,12 +299,12 @@ public class ControllerAgent extends Agent {
         Runtime runtime = Runtime.instance();
         ProfileImpl pc = new ProfileImpl(false);
         pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
-        pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
+//        pc.setParameter(ProfileImpl.MAIN_HOST, host_ip);
 
         ac = runtime.createAgentContainer(pc);
         try {ac.start();} catch (ControllerException e) {throw new RuntimeException(e);}
 
-        System.out.println(ac.getName());
+        String host_ip = ac.getName().split(":")[0];
 
         // Choosing sick agents
         sick_agent_count = init_sick;
@@ -367,6 +324,7 @@ public class ControllerAgent extends Agent {
             for (int i=0; i<agent_count; i++){
                 String init_status = arrayContains(sick_indices, i)? "sick": "healthy";
                 AgentController wandererAgent = ac.createNewAgent(container_name + "-Wanderer-" + i, "agents.WanderingAgent", new Object[]{
+                        host_ip,
                         container_name,
                         init_status,
                         agent_speed,
@@ -387,22 +345,10 @@ public class ControllerAgent extends Agent {
         }
 
         // Find the list of generated wandering agents
-        DFAgentDescription template = new DFAgentDescription();
-        ServiceDescription sd = new ServiceDescription();
-        sd.setType(container_name + "-wanderer-group");
-        template.addServices(sd);
-        try {
-            DFAgentDescription[] result = DFService.search(this, template);
-            wanderer_agents = new AID[agent_count];
-            for (int i = 0; i<agent_count; ++i) wanderer_agents[i] = result[i].getName();
-
-            if (DEBUG) {
-                System.out.println("Found the following wandering agents:");
-                for (AID agent : wanderer_agents) System.out.println("\t" + agent.getName());
-            }
-        }
-        catch (FIPAException fe) {
-            fe.printStackTrace();
+        wanderer_agents = getAgentsAtService(this, container_name + "-wanderer-group");
+        if (DEBUG) {
+            System.out.println("Found the following wandering agents:");
+            for (AID agent : wanderer_agents) System.out.println("\t" + agent.getName());
         }
     }
 
@@ -468,7 +414,7 @@ public class ControllerAgent extends Agent {
         int addedWidth = insets.left + insets.right;
         int addedHeight = insets.top + insets.bottom;
 
-        System.out.println(title.getSize());
+//        System.out.println(title.getSize());
 
         container_frame.setSize(540+addedWidth, 596+addedHeight);
 

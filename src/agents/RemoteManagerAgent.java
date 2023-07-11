@@ -3,16 +3,13 @@ package agents;
 import jade.core.AID;
 import jade.core.Agent;
 import jade.core.behaviours.CyclicBehaviour;
-import jade.domain.DFService;
-import jade.domain.FIPAAgentManagement.DFAgentDescription;
-import jade.domain.FIPAAgentManagement.ServiceDescription;
-import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
-import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentContainer;
 import jade.wrapper.AgentController;
 
 import java.util.Objects;
+
+import static agents.Util.*;
 
 public class RemoteManagerAgent extends Agent {
     private AID local_manager;
@@ -20,32 +17,17 @@ public class RemoteManagerAgent extends Agent {
     @Override
     protected void setup() {
         // Registering to the Controller group service
-        try {
-            DFAgentDescription dfd = new DFAgentDescription();
-            dfd.setName(getAID());
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType("remote-manager");
-            sd.setName("Remote");
-            dfd.addServices(sd);
-            DFService.register(this, dfd);
-        }
-        catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        registerAgentAtService(this, "remote-manager");
 
         // Receiving intro from local manager
         System.out.println("Remote manager settled and registered to service");
-        ACLMessage intro_message = blockingReceive(MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("intro")));
+        ACLMessage intro_message = blockingReceive(getMessageTemplate(ACLMessage.INFORM, "intro"));
         local_manager = intro_message.getSender();
 
         addBehaviour(new CyclicBehaviour() {
             @Override
             public void action() {
-                ACLMessage container_management = blockingReceive(MessageTemplate.and(
-                        MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                        MessageTemplate.MatchOntology("container")));
+                ACLMessage container_management = blockingReceive(getMessageTemplate(ACLMessage.INFORM, "container"));
 
                 String message_content = container_management.getContent();
                 String[] message_content_parts = message_content.split(" ");
@@ -96,23 +78,13 @@ public class RemoteManagerAgent extends Agent {
                     }
 
                     // Send confirmation
-                    ACLMessage confirmation_message = new ACLMessage(ACLMessage.INFORM);
-                    confirmation_message.setOntology("confirm_created");
-                    confirmation_message.addReceiver(local_manager);
+                    ACLMessage confirmation_message = createMessage(ACLMessage.INFORM, "confirm_created", local_manager);
                     send(confirmation_message);
                 }
             }
         });
 
-        ACLMessage ready_message = new ACLMessage(ACLMessage.INFORM);
-        ready_message.setOntology("ready");
-        ready_message.addReceiver(local_manager);
+        ACLMessage ready_message = createMessage(ACLMessage.INFORM, "ready", local_manager);
         send(ready_message);
-
-    }
-
-    private void createSubContainers(int n) {
-        // Local containers
-
     }
 }

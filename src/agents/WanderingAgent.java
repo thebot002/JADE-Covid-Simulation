@@ -4,15 +4,13 @@ import jade.core.AID;
 import jade.core.Agent;
 import jade.core.ContainerID;
 import jade.core.behaviours.CyclicBehaviour;
-import jade.domain.DFService;
-import jade.domain.FIPAAgentManagement.DFAgentDescription;
-import jade.domain.FIPAAgentManagement.ServiceDescription;
-import jade.domain.FIPAException;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 
 import java.util.Objects;
 import java.util.Random;
+
+import static agents.Util.*;
 
 public class WanderingAgent extends Agent {
 
@@ -26,13 +24,16 @@ public class WanderingAgent extends Agent {
     private final int MAX_DIR_CHANGE = 20;
 
     // Neighbours
-    AID[] neighbour_agents;
+    private AID[] neighbour_agents;
 
     // Status variables
     private String status;
     private int sickness_length = -1;
+    private boolean is_on_travel = false;
+    private int travel_length = 0;
 
     // common agent variables
+    private String host_ip;
     private String container_name;
     private double speed;
     private int contamination_radius;
@@ -44,9 +45,8 @@ public class WanderingAgent extends Agent {
 
     // Controller
     private AID controller_agent;
-
-    // Agent service description
-    private DFAgentDescription dfd;
+    private AID[] other_controller_agents;
+    private AID travel_controller_agent;
 
     // DEBUG
     private final boolean DEBUG = false;
@@ -61,31 +61,21 @@ public class WanderingAgent extends Agent {
             doDelete();
         }
 
-        this.container_name = (String) args[0];
-        this.status = (String) args[1];
-        this.speed = ((double) args[2]);
-        this.contamination_radius = ((int) args[3]);
-        this.contamination_probability = ((double) args[4]);
-        this.min_contamination_length = ((int) args[5]);
-        this.max_contamination_length = ((int) args[6]);
-        this.travel_chance = ((double) args[7]);
-        this.average_travel_duration = ((int) args[8]);
+        this.host_ip = (String) args[0];
+        this.container_name = (String) args[1];
+        this.status = (String) args[2];
+        this.speed = ((double) args[3]);
+        this.contamination_radius = ((int) args[4]);
+        this.contamination_probability = ((double) args[5]);
+        this.min_contamination_length = ((int) args[6]);
+        this.max_contamination_length = ((int) args[7]);
+        this.travel_chance = ((double) args[8]);
+        this.average_travel_duration = ((int) args[9]);
 
         if (DEBUG) System.out.println("[" + getName() + "]" + " ready with status " + this.status);
 
         // Registering to the Wanderer group service
-        try {
-            dfd = new DFAgentDescription();
-            dfd.setName(getAID());
-            ServiceDescription sd = new ServiceDescription();
-            sd.setType(container_name + "-wanderer-group");
-            sd.setName("Wanderers");
-            dfd.addServices(sd);
-            DFService.register(this, dfd);
-        }
-        catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        registerAgentAtService(this, container_name + "-wanderer-group");
 
         // Define initial position
         Random rand = new Random();
@@ -97,38 +87,33 @@ public class WanderingAgent extends Agent {
         this.headingDegrees = (int) (rand.nextDouble() * 360);
 
         // Waiting for signal from controller to probe for list of neighbour agents
-        ACLMessage ready_msg = blockingReceive(MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("ready")));
-
+        ACLMessage ready_msg = blockingReceive(getMessageTemplate(ACLMessage.INFORM,"ready"));
         controller_agent = ready_msg.getSender();
         if(DEBUG) System.out.println("[" + getName() + "]" + " received ready from " + controller_agent.getName());
 
         // Setup status message
-        ACLMessage status_message = new ACLMessage(ACLMessage.INFORM);
-        status_message.setOntology("status");
-        status_message.addReceiver(controller_agent);
-
-        // Reply to the ready with initial location
-        status_message.setContent(statusString());
-        send(status_message);
+        ACLMessage status_message = createMessage(ACLMessage.INFORM, "status", controller_agent);
 
         // Get other agents
-        neighbour_agents = getNeighbours();
+        neighbour_agents = getAgentsAtService(this,container_name + "-wanderer-group", getAID());
         if (DEBUG) {
             System.out.println(getName() + ": found agents:");
             for (AID agent: neighbour_agents) System.out.println("\t" + agent.getName());
         }
 
-        // Setup exhale message
-        ACLMessage exhale_message = new ACLMessage(ACLMessage.INFORM);
-        exhale_message.setOntology("exhale");
-        for (AID neighbour: neighbour_agents) exhale_message.addReceiver(neighbour);
+        // Setup exhale message and template
+        ACLMessage exhale_message = createMessage(ACLMessage.INFORM, "exhale", neighbour_agents);
+        MessageTemplate exhale_message_template = getMessageTemplate(ACLMessage.INFORM,"exhale");
 
-        // Setup exhale message template
-        MessageTemplate exhale_message_template = MessageTemplate.and(
-                MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                MessageTemplate.MatchOntology("exhale"));
+        // Reply to the ready with initial location
+        status_message.setContent(statusString());
+        send(status_message);
+
+        // Receive first go from controller meaning all controllers are ready
+        MessageTemplate go_message_template = getMessageTemplate(ACLMessage.INFORM, "GO");
+
+        // Retrieving all other controllers for potential travels
+        other_controller_agents = getAgentsAtService(this, "controller-group", controller_agent);
 
         // Initialize loop behavior
         addBehaviour(new CyclicBehaviour() {
@@ -146,10 +131,10 @@ public class WanderingAgent extends Agent {
 
             @Override
             public void action() {
+                Random rand = new Random();
+
                 // 1. Receive GO
-                ACLMessage go_msg = blockingReceive(MessageTemplate.and(
-                        MessageTemplate.MatchPerformative(ACLMessage.INFORM),
-                        MessageTemplate.MatchOntology("GO")));
+                ACLMessage go_msg = blockingReceive(go_message_template);
 
                 if (DEBUG) System.out.println("[" + getName() + "]" + " Received GO");
 
@@ -162,31 +147,23 @@ public class WanderingAgent extends Agent {
                 }
 
                 // 2.0 Potential travel
-                Random rand = new Random();
-                if (rand.nextDouble() < travel_chance) {
-                    ACLMessage travel_request_message = new ACLMessage(ACLMessage.REQUEST);
-                    travel_request_message.setOntology("travel");
-                    travel_request_message.addReceiver(controller_agent);
-                    send(travel_request_message);
+                if (!is_on_travel) {
+                    if (rand.nextDouble() < travel_chance) {
+                        int other_controller_index = rand.nextInt(other_controller_agents.length);
+                        travel_controller_agent = other_controller_agents[other_controller_index];
+                        travel(controller_agent, travel_controller_agent);
 
-                    ACLMessage agree_message = blockingReceive(MessageTemplate.and(
-                            MessageTemplate.MatchPerformative(ACLMessage.AGREE),
-                            MessageTemplate.MatchOntology("travel")));
-
-                    String travel_to_container = agree_message.getContent();
-                    System.out.println("Travelling to " + travel_to_container);
-
-                    // perform the move
-                    ContainerID cID= new ContainerID();
-                    cID.setName(travel_to_container); //Destination container
-                    cID.setAddress("localhost"); //IP of the host of the container
-                    cID.setPort("1099"); //port associated with Jade
-                    this.myAgent.doMove(cID);
-
-                    // Switch service
-
-
-                    return;
+                        is_on_travel = true;
+                        return;
+                    }
+                }
+                else {
+                    // Check whether to return
+                    travel_length++;
+                    if (travel_length > rand.nextDouble() * average_travel_duration * 2){
+                        travel(travel_controller_agent, controller_agent);
+                        System.out.println("[" + getName() + "] Travelling back");
+                    }
                 }
 
                 // 2.1 Move
@@ -225,7 +202,6 @@ public class WanderingAgent extends Agent {
                 if (Objects.equals(status, "sick")) {
                     sickness_length++;
                     if (sickness_length >= min_contamination_length){
-                        rand = new Random();
                         double heal_chance = ((sickness_length - min_contamination_length) * 1.0) / (max_contamination_length - min_contamination_length);
 
                         if (rand.nextDouble() < heal_chance) status = "recovered";
@@ -241,7 +217,6 @@ public class WanderingAgent extends Agent {
     }
 
     private void move(){
-
         // Altering direction
         Random rand = new Random();
         int headingChange = (int)((rand.nextDouble()*(this.MAX_DIR_CHANGE*2)) - this.MAX_DIR_CHANGE);
@@ -270,31 +245,35 @@ public class WanderingAgent extends Agent {
         return this.position[0] + ";" + this.position[1] + ";" + this.status;
     }
 
-    private AID[] getNeighbours(){
+    private void travel(AID from_controller, AID to_controller) {
+        // Send request to source controller
+        ACLMessage travel_leave_request_message = createMessage(ACLMessage.REQUEST, "travel", from_controller);
+        travel_leave_request_message.setContent("leave");
+        send(travel_leave_request_message);
 
-        AID[] neighnour_agents;
-        DFAgentDescription template = new DFAgentDescription();
-        ServiceDescription sd = new ServiceDescription();
-        sd.setType(container_name + "-wanderer-group");
-        template.addServices(sd);
+        // Send request to target controller
+        ACLMessage travel_request_message = createMessage(ACLMessage.REQUEST, "travel", from_controller);
+        travel_request_message.setContent("arrive");
+        send(travel_request_message);
 
-        try {
-            DFAgentDescription[] result = DFService.search(this, template);
-            neighnour_agents = new AID[result.length-1];
-            int agent_number = 0;
-            for (DFAgentDescription dfAgentDescription : result) {
-                AID agent = dfAgentDescription.getName();
-                if (!Objects.equals(agent, getAID())) {
-                    neighnour_agents[agent_number] = agent;
-                    agent_number++;
-                }
-            }
-            return neighnour_agents;
+        // Receive confirmations
+        MessageTemplate agreement_message_template = getMessageTemplate(ACLMessage.AGREE, "travel");
+        String target_container_name = "";
+        for (int i = 0; i < 2; i++) {
+            ACLMessage answer = blockingReceive(agreement_message_template);
+            if (answer != null && answer.getContent() != null && answer.getContent().length() > 0) target_container_name = answer.getContent();
         }
-        catch (FIPAException fe) {
-            fe.printStackTrace();
-        }
+        if (DEBUG) System.out.println("[" + getName() + "] Travelling to " + target_container_name);
 
-        return null;
+        // perform the move
+        ContainerID cID = new ContainerID();
+        cID.setName(target_container_name); //Destination container
+        cID.setAddress(host_ip); //IP of the host of the container
+        cID.setPort("1099"); //port associated with Jade
+        doMove(cID);
+
+        // Send notice to all neighbours
+
+        // Get new neighbours
     }
 }
