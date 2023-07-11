@@ -41,6 +41,8 @@ public class ControllerAgent extends Agent {
     private double contamination_prob;
     private int min_contamination_length;
     private int max_contamination_length;
+    private double travel_chance;
+    private int average_travel_duration;
 
     // Agents variables
     private AID[] wanderer_agents;
@@ -48,7 +50,9 @@ public class ControllerAgent extends Agent {
     private AgentStatus[] agent_statuses;
     private boolean sent_done = false;
 
+    // containers
     private AgentContainer ac;
+    private String[] all_other_containers;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
@@ -59,6 +63,9 @@ public class ControllerAgent extends Agent {
     private final MessageTemplate kill_message_template = MessageTemplate.and(
             MessageTemplate.MatchPerformative(ACLMessage.INFORM),
             MessageTemplate.MatchOntology("kill"));
+    private final MessageTemplate travel_request_message_template = MessageTemplate.and(
+            MessageTemplate.MatchPerformative(ACLMessage.REQUEST),
+            MessageTemplate.MatchOntology("travel"));
     private ACLMessage move_go_msg;
     private ACLMessage done_message;
 
@@ -87,6 +94,8 @@ public class ControllerAgent extends Agent {
         contamination_prob = ((double) args[6]);
         min_contamination_length = ((int) args[7]);
         max_contamination_length = ((int) args[8]);
+        travel_chance = ((double) args[9]);
+        average_travel_duration = ((int) args[10]);
 
         // Setup agent status and position arrays
         agent_positions = new double[agent_count][2];
@@ -145,13 +154,23 @@ public class ControllerAgent extends Agent {
         // Send ready and Wait for go from manager
         ACLMessage manager_ready_message = new ACLMessage(ACLMessage.INFORM);
         manager_ready_message.setOntology("ready");
+        manager_ready_message.setContent(container_name);
         manager_ready_message.addReceiver(manager_agent);
         send(manager_ready_message);
 
-        blockingReceive(MessageTemplate.and(
+        ACLMessage go_message = blockingReceive(MessageTemplate.and(
                 MessageTemplate.MatchPerformative(ACLMessage.INFORM),
                 MessageTemplate.MatchOntology("GO")));
+        String[] all_containers = go_message.getContent().split(" ");
 
+        all_other_containers = new String[all_containers.length - 1];
+        int index = 0;
+        for (String container: all_containers) {
+            if (!Objects.equals(container_name, container)) {
+                all_other_containers[index] = container;
+                index += 1;
+            }
+        }
         // Initialize loop
         TickerBehaviour loop_behavior = new TickerBehaviour(this, 100) {
             @Override
@@ -168,8 +187,44 @@ public class ControllerAgent extends Agent {
 
                 // Receive new locations
                 String[] replies = new String[agent_count];
-                for (int i = 0; i < agent_count; i++)
-                    replies[i] = blockingReceive(status_message_template).getContent();
+                int received_replies = 0;
+                while (received_replies < agent_count) {
+                    // Receive travel request
+                    ACLMessage travel_request_message = receive(travel_request_message_template);
+
+                    if (travel_request_message != null) {
+                        Random rand = new Random();
+                        int travel_container_index = rand.nextInt(all_other_containers.length);
+                        String travel_container_name = all_other_containers[travel_container_index];
+
+                        ACLMessage travel_agreement_message = new ACLMessage(ACLMessage.AGREE);
+                        travel_agreement_message.setOntology("travel");
+                        travel_agreement_message.setContent(travel_container_name);
+                        travel_agreement_message.addReceiver(travel_request_message.getSender());
+                        send(travel_agreement_message);
+
+                        agent_count--;
+                        continue;
+                    }
+
+                    // Receive travelling agent
+                    ACLMessage travelling_agent_message = receive(MessageTemplate.and(
+                            MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                            MessageTemplate.MatchOntology("new-agent")));
+
+                    if (travelling_agent_message != null) {
+                        agent_count++;
+                        continue;
+                    }
+
+                    // Done information
+                    ACLMessage done_message = receive(status_message_template);
+
+                    if (done_message != null) {
+                        replies[received_replies] = done_message.getContent();
+                        received_replies++;
+                    }
+                }
 
                 if (DEBUG) {
                     System.out.println("New locations");
@@ -292,6 +347,8 @@ public class ControllerAgent extends Agent {
         ac = runtime.createAgentContainer(pc);
         try {ac.start();} catch (ControllerException e) {throw new RuntimeException(e);}
 
+        System.out.println(ac.getName());
+
         // Choosing sick agents
         sick_agent_count = init_sick;
         int[] sick_indices = new int[init_sick];
@@ -316,7 +373,9 @@ public class ControllerAgent extends Agent {
                         contamination_radius,
                         contamination_prob,
                         min_contamination_length,
-                        max_contamination_length
+                        max_contamination_length,
+                        travel_chance,
+                        average_travel_duration
                 });
                 wandererAgent.start();
             }

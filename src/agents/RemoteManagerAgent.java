@@ -62,6 +62,8 @@ public class RemoteManagerAgent extends Agent {
                     double contamination_prob = Double.parseDouble(message_content_parts[6]);
                     int min_contamination_length = Integer.parseInt(message_content_parts[7]);
                     int max_contamination_length = Integer.parseInt(message_content_parts[8]);
+                    double travel_chance = Double.parseDouble(message_content_parts[9]);
+                    int average_travel_duration = Integer.parseInt(message_content_parts[8]);
 
                     // Create containers
                     for (int i = 0; i < container_count; i++) {
@@ -81,7 +83,9 @@ public class RemoteManagerAgent extends Agent {
                                     contamination_radius,
                                     contamination_prob,
                                     min_contamination_length,
-                                    max_contamination_length
+                                    max_contamination_length,
+                                    travel_chance,
+                                    average_travel_duration
                             };
                             AgentController controllerAgent = mc.createNewAgent("Remote-Controller-" + container_id, "agents.ControllerAgent", controller_arguments);
                             controllerAgent.start();

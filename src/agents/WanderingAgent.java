@@ -2,6 +2,7 @@ package agents;
 
 import jade.core.AID;
 import jade.core.Agent;
+import jade.core.ContainerID;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.domain.DFService;
 import jade.domain.FIPAAgentManagement.DFAgentDescription;
@@ -35,9 +36,14 @@ public class WanderingAgent extends Agent {
     private String container_name;
     private double speed;
     private int contamination_radius;
-    private double contamination_probability; // To make vary
+    private double contamination_probability;
     private int min_contamination_length;
     private int max_contamination_length;
+    private double travel_chance;
+    private int average_travel_duration;
+
+    // Controller
+    private AID controller_agent;
 
     // Agent service description
     private DFAgentDescription dfd;
@@ -50,7 +56,7 @@ public class WanderingAgent extends Agent {
 
         // Retrieving initial status and parameters
         Object[] args = getArguments();
-        if (args.length < 6) {
+        if (args.length < 9) {
             System.out.println("Not enough arguments, self destruction");
             doDelete();
         }
@@ -62,6 +68,8 @@ public class WanderingAgent extends Agent {
         this.contamination_probability = ((double) args[4]);
         this.min_contamination_length = ((int) args[5]);
         this.max_contamination_length = ((int) args[6]);
+        this.travel_chance = ((double) args[7]);
+        this.average_travel_duration = ((int) args[8]);
 
         if (DEBUG) System.out.println("[" + getName() + "]" + " ready with status " + this.status);
 
@@ -88,17 +96,18 @@ public class WanderingAgent extends Agent {
         // Define initial heading
         this.headingDegrees = (int) (rand.nextDouble() * 360);
 
-        // Waiting for signal to probe for list of neighbour agents
+        // Waiting for signal from controller to probe for list of neighbour agents
         ACLMessage ready_msg = blockingReceive(MessageTemplate.and(
                 MessageTemplate.MatchPerformative(ACLMessage.INFORM),
                 MessageTemplate.MatchOntology("ready")));
 
-        if(DEBUG) System.out.println("[" + getName() + "]" + " received ready from " + ready_msg.getSender().getName());
+        controller_agent = ready_msg.getSender();
+        if(DEBUG) System.out.println("[" + getName() + "]" + " received ready from " + controller_agent.getName());
 
         // Setup status message
         ACLMessage status_message = new ACLMessage(ACLMessage.INFORM);
         status_message.setOntology("status");
-        status_message.addReceiver(ready_msg.getSender());
+        status_message.addReceiver(controller_agent);
 
         // Reply to the ready with initial location
         status_message.setContent(statusString());
@@ -126,12 +135,13 @@ public class WanderingAgent extends Agent {
             /*
             Steps
             1. Receive Move GO
-            2. Move
-
-            5. Exhale message to all neighbour agents
-            6. Inhale message from all neighbour agents
-
-            7. Report back status and new location
+            1.1 Delete if receives signal
+            2.0 Potential Travel
+            2.1 Move
+            3. Exhale message to all neighbour agents
+            4. Inhale message from all neighbour agents
+            5. New health status
+            6. Report back status and new location
              */
 
             @Override
@@ -151,7 +161,35 @@ public class WanderingAgent extends Agent {
                     return;
                 }
 
-                // 2. Move
+                // 2.0 Potential travel
+                Random rand = new Random();
+                if (rand.nextDouble() < travel_chance) {
+                    ACLMessage travel_request_message = new ACLMessage(ACLMessage.REQUEST);
+                    travel_request_message.setOntology("travel");
+                    travel_request_message.addReceiver(controller_agent);
+                    send(travel_request_message);
+
+                    ACLMessage agree_message = blockingReceive(MessageTemplate.and(
+                            MessageTemplate.MatchPerformative(ACLMessage.AGREE),
+                            MessageTemplate.MatchOntology("travel")));
+
+                    String travel_to_container = agree_message.getContent();
+                    System.out.println("Travelling to " + travel_to_container);
+
+                    // perform the move
+                    ContainerID cID= new ContainerID();
+                    cID.setName(travel_to_container); //Destination container
+                    cID.setAddress("localhost"); //IP of the host of the container
+                    cID.setPort("1099"); //port associated with Jade
+                    this.myAgent.doMove(cID);
+
+                    // Switch service
+
+
+                    return;
+                }
+
+                // 2.1 Move
                 move();
 
                 // 3. Exhale message to all neighbours
@@ -181,21 +219,20 @@ public class WanderingAgent extends Agent {
                             status = "sick";
                         }
                     }
-
                 }
 
-                // 4.1 If sick check if switch back to healthy
+                // 5. If sick check if switch back to healthy
                 if (Objects.equals(status, "sick")) {
                     sickness_length++;
                     if (sickness_length >= min_contamination_length){
-                        Random rand = new Random();
+                        rand = new Random();
                         double heal_chance = ((sickness_length - min_contamination_length) * 1.0) / (max_contamination_length - min_contamination_length);
 
                         if (rand.nextDouble() < heal_chance) status = "recovered";
                     }
                 }
 
-                // 5. Report back status
+                // 6. Report back status
                 status_message.setContent(statusString());
                 send(status_message);
             }

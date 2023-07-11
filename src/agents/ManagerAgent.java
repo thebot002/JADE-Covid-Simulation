@@ -41,6 +41,8 @@ public class ManagerAgent extends Agent {
     private double contamination_prob = 0.8;
     private int min_contamination_length = 20;
     private int max_contamination_length = 30;
+    private double travel_chance = 0.0001;
+    private int average_travel_duration = 5;
 
     // variable fields
     private JTextField
@@ -52,7 +54,9 @@ public class ManagerAgent extends Agent {
             contaminationRadiusInput,
             contaminationProbInput,
             minContaminationLengthInput,
-            maxContaminationLengthInput;
+            maxContaminationLengthInput,
+            travelChanceInput,
+            travelDurationInput;
 
     // Controller agents
     private AID[] controller_agents;
@@ -95,7 +99,7 @@ public class ManagerAgent extends Agent {
         JFrame frame = new JFrame();
         frame.setTitle("COVID Sim - Menu");
         frame.setLocation(100,100);
-        frame.setSize(new Dimension(400,340));
+        frame.setSize(new Dimension(400,420));
 
         // Creation of content pane inside
         JPanel contentFrame = new JPanel();
@@ -151,8 +155,18 @@ public class ManagerAgent extends Agent {
         maxContaminationLengthInput = new JTextField(Integer.toString(max_contamination_length));
         options.add(maxContaminationLengthInput);
 
+        // travel chance
+        options.add(new Label("Agent travel chance:"));
+        travelChanceInput = new JTextField(Double.toString(travel_chance));
+        options.add(travelChanceInput);
+
+        // travel duration
+        options.add(new Label("Agent average travel duration:"));
+        travelDurationInput = new JTextField(Integer.toString(average_travel_duration));
+        options.add(travelDurationInput);
+
         // Grid setup
-        options.setLayout(new GridLayout(9,2));
+        options.setLayout(new GridLayout(11,2));
 
         // Start button
         JButton startButton = new JButton("Start simulation");
@@ -185,6 +199,8 @@ public class ManagerAgent extends Agent {
             contamination_prob = Double.parseDouble(contaminationProbInput.getText());
             min_contamination_length = Integer.parseInt(minContaminationLengthInput.getText());
             max_contamination_length = Integer.parseInt(maxContaminationLengthInput.getText());
+            travel_chance = Double.parseDouble(travelChanceInput.getText());
+            average_travel_duration = Integer.parseInt(travelDurationInput.getText());
 
             if(!validateInputs()) return;
 
@@ -221,12 +237,18 @@ public class ManagerAgent extends Agent {
             MessageTemplate ready_message_template = MessageTemplate.and(
                     MessageTemplate.MatchPerformative(ACLMessage.INFORM),
                     MessageTemplate.MatchOntology("ready"));
-            for (AID ignored : controller_agents) blockingReceive(ready_message_template);
+            String[] all_containers = new String[container_count];
+            for (int i = 0; i < container_count; i++) all_containers[i] = blockingReceive(ready_message_template).getContent();
 
             // Send back go to all
             ACLMessage go_message = new ACLMessage(ACLMessage.INFORM);
             go_message.setOntology("GO");
-            for (AID agent: controller_agents) go_message.addReceiver(agent);
+            String container_set = "";
+            for (int i = 0; i < container_count; i++) {
+                container_set += all_containers[i] + " ";
+                go_message.addReceiver(controller_agents[i]);
+            }
+            go_message.setContent(container_set.trim());
             send(go_message);
 
             this_agent.addBehaviour(done_request_behavior);
@@ -241,7 +263,9 @@ public class ManagerAgent extends Agent {
                 || agent_speed <= 0
                 || contamination_radius <= 0
                 || min_contamination_length < 0
-                || max_contamination_length <= 0){
+                || max_contamination_length <= 0
+                || travel_chance < 0
+                || average_travel_duration < 0){
             System.out.println("None of the inputs can be negative");
             return false;
         }
@@ -279,6 +303,8 @@ public class ManagerAgent extends Agent {
             parameters += " " + contamination_prob;
             parameters += " " + min_contamination_length;
             parameters += " " + max_contamination_length;
+            parameters += " " + travel_chance;
+            parameters += " " + average_travel_duration;
             create_containers_message.setContent("create " + remote_container_count + parameters);
             create_containers_message.addReceiver(remote_manager);
             System.out.println("Sending create container signal");
@@ -308,7 +334,9 @@ public class ManagerAgent extends Agent {
                         contamination_radius,
                         contamination_prob,
                         min_contamination_length,
-                        max_contamination_length
+                        max_contamination_length,
+                        travel_chance,
+                        average_travel_duration
                 };
                 AgentController controllerAgent = mc.createNewAgent("Controller-" + container_id, "agents.ControllerAgent", controller_arguments);
                 controllerAgent.start();
