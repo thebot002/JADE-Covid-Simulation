@@ -266,8 +266,10 @@ public class ControllerAgent extends Agent {
         agent_count = 0;
 
         // Deleting windows
-        container_frame.dispose();
-        exit_confirmation_window.dispose();
+        if (gui_enabled) {
+            container_frame.dispose();
+            exit_confirmation_window.dispose();
+        }
 
         // Kill container
         try {
