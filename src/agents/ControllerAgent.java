@@ -31,7 +31,8 @@ public class ControllerAgent extends Agent {
     // DEBUG
     private final boolean DEBUG = false;
 
-    private int container_id;
+    private String container_name;
+    private boolean gui_enabled;
     private int agent_count;
     private int sick_agent_count;
     private int init_sick;
@@ -45,6 +46,7 @@ public class ControllerAgent extends Agent {
     private AID[] wanderer_agents;
     private double[][] agent_positions;
     private AgentStatus[] agent_statuses;
+    private boolean sent_done = false;
 
     private AgentContainer ac;
 
@@ -76,14 +78,15 @@ public class ControllerAgent extends Agent {
         }
 
         // Setup variables
-        container_id = ((int) args[0]);
-        agent_count = ((int) args[1]);
-        init_sick = ((int) args[2]);
-        agent_speed = ((double) args[3]);
-        contamination_radius = ((int) args[4]);
-        contamination_prob = ((double) args[5]);
-        min_contamination_length = ((int) args[6]);
-        max_contamination_length = ((int) args[7]);
+        container_name = ((String) args[0]);
+        gui_enabled = ((boolean) args[1]);
+        agent_count = ((int) args[2]);
+        init_sick = ((int) args[3]);
+        agent_speed = ((double) args[4]);
+        contamination_radius = ((int) args[5]);
+        contamination_prob = ((double) args[6]);
+        min_contamination_length = ((int) args[7]);
+        max_contamination_length = ((int) args[8]);
 
         // Setup agent status and position arrays
         agent_positions = new double[agent_count][2];
@@ -134,9 +137,10 @@ public class ControllerAgent extends Agent {
         move_go_msg.setOntology("GO");
         for (AID agent: wanderer_agents) move_go_msg.addReceiver(agent);
 
-        createExitConfirmationWindow();
-
-        createContainerWindow();
+        if (gui_enabled) {
+            createExitConfirmationWindow();
+            createContainerWindow();
+        }
 
         // Send ready and Wait for go from manager
         ACLMessage manager_ready_message = new ACLMessage(ACLMessage.INFORM);
@@ -173,18 +177,23 @@ public class ControllerAgent extends Agent {
                 }
 
                 // Redraw container frame
-                processReplies(replies);
-                wandererEnvironmentPanel.repaint();
+                if (gui_enabled) {
+                    processReplies(replies);
+                    wandererEnvironmentPanel.repaint();
+                }
 
                 // Process if simulation is done
-                if (sick_agent_count == 0) {
+                if (!sent_done && sick_agent_count == 0) {
                     done_message.setContent("container done");
                     send(done_message);
+                    sent_done = !sent_done;
                 }
 
                 // Tracking time end
                 long duration_s = System.currentTimeMillis() - start_time;
-                if (DEBUG) System.out.println("[Controller] Iteration done in (ms): " + duration_s);
+                if (DEBUG) System.out.println("[" + container_name + "] Iteration done in (ms): " + duration_s);
+
+                if (!sent_done) System.out.println("[" + container_name + "] " + sick_agent_count);
             }
         };
 
@@ -269,7 +278,7 @@ public class ControllerAgent extends Agent {
             throw new RuntimeException(e);
         }
 
-        System.out.println("Finishing deleting container-" + container_id);
+        System.out.println("Finishing deleting " + container_name);
         super.doDelete();
     }
 
@@ -277,7 +286,7 @@ public class ControllerAgent extends Agent {
         // Generation of agents
         Runtime runtime = Runtime.instance();
         ProfileImpl pc = new ProfileImpl(false);
-        pc.setParameter(ProfileImpl.CONTAINER_NAME, "Container-"+(container_id));
+        pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
         pc.setParameter(ProfileImpl.MAIN_HOST, "localhost");
 
         ac = runtime.createAgentContainer(pc);
@@ -300,8 +309,8 @@ public class ControllerAgent extends Agent {
             // Generation of agents
             for (int i=0; i<agent_count; i++){
                 String init_status = arrayContains(sick_indices, i)? "sick": "healthy";
-                AgentController wandererAgent = ac.createNewAgent("Wanderer-" + container_id + "-" + i, "agents.WanderingAgent", new Object[]{
-                        container_id,
+                AgentController wandererAgent = ac.createNewAgent(container_name + "-Wanderer-" + i, "agents.WanderingAgent", new Object[]{
+                        container_name,
                         init_status,
                         agent_speed,
                         contamination_radius,
@@ -321,7 +330,7 @@ public class ControllerAgent extends Agent {
         // Find the list of generated wandering agents
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription sd = new ServiceDescription();
-        sd.setType("wanderer-group-" + container_id);
+        sd.setType(container_name + "-wanderer-group");
         template.addServices(sd);
         try {
             DFAgentDescription[] result = DFService.search(this, template);
@@ -369,7 +378,7 @@ public class ControllerAgent extends Agent {
     private void createContainerWindow() {
         // Container frame
         container_frame = new JFrame();
-        container_frame.setTitle("Container-"+container_id);
+        container_frame.setTitle(container_name);
         container_frame.setLocation(100,100);
 
         // TODO add statisitcs pane
@@ -385,7 +394,7 @@ public class ControllerAgent extends Agent {
         container_frame.add(contentPane);
         contentPane.setLayout(new BorderLayout(20,20));
 
-        JLabel title = new JLabel("Container-" + container_id + " - simulation", SwingConstants.CENTER);
+        JLabel title = new JLabel(container_name + " - simulation", SwingConstants.CENTER);
         title.setFont(new Font("Arial", Font.BOLD, 30));
         contentPane.add(title, BorderLayout.NORTH);
 

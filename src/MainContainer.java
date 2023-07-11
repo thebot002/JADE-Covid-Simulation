@@ -7,10 +7,13 @@ import jade.core.Runtime;
 import jade.util.ExtendedProperties;
 import jade.util.leap.Properties;
 import jade.wrapper.AgentController;
+import jade.wrapper.ControllerException;
+import jade.wrapper.StaleProxyException;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.rmi.ConnectIOException;
 import java.util.Objects;
 
 public class MainContainer {
@@ -21,6 +24,7 @@ public class MainContainer {
             Properties properties = new ExtendedProperties();
             properties.setProperty(Profile.GUI, "true");
             properties.setProperty("jade_domain_df_autocleanup", "true");
+            if ((args.length > 0) && Objects.equals(args[0], "remote_support")) properties.setProperty(ProfileImpl.MAIN_HOST, "10.8.0.2");
             ProfileImpl pc = new ProfileImpl(properties);
 
             AgentContainer mc = runtime.createMainContainer(pc);

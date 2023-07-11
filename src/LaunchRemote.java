@@ -10,7 +10,7 @@ public class LaunchRemote {
             // Remote main container
             Runtime runtime = Runtime.instance();
             ProfileImpl pc = new ProfileImpl(false);
-            pc.setParameter(ProfileImpl.CONTAINER_NAME, "RPI-Main-Container");
+            pc.setParameter(ProfileImpl.CONTAINER_NAME, "Remote-Main-Container");
             pc.setParameter(ProfileImpl.MAIN_HOST, "10.8.0.2");
             AgentContainer ac = runtime.createAgentContainer(pc);
             ac.start();

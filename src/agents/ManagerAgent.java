@@ -1,7 +1,6 @@
 package agents;
 
 import com.jcraft.jsch.*;
-import com.jcraft.jsch.Channel;
 
 import jade.core.*;
 import jade.core.behaviours.CyclicBehaviour;
@@ -78,8 +77,9 @@ public class ManagerAgent extends Agent {
     private WaitDoneRequest done_request_behavior = new WaitDoneRequest();
 
     // Remote variables
-    boolean remote_launched = false;
-    AID remote_manager;
+    private boolean remote_launched = false;
+    private AID remote_manager;
+    private InputStream remote_input_stream;
 
     //debug
     private final boolean DEBUG = true;
@@ -188,7 +188,7 @@ public class ManagerAgent extends Agent {
 
             if(!validateInputs()) return;
 
-            createSubContainer();
+            createSubContainers();
 
             try {sleep(1000);} catch (InterruptedException ex) { throw new RuntimeException(ex); }
 
@@ -264,49 +264,57 @@ public class ManagerAgent extends Agent {
         return true;
     }
 
-    private void createSubContainer(){
+    private void createSubContainers(){
 
-        int container_id;
-        String container_name;
+        // Remote containers
+        if (remote_container_count > 0) {
+            if(!remote_launched) launchRemote();
+            ACLMessage create_containers_message = new ACLMessage(ACLMessage.INFORM);
+            create_containers_message.setOntology("container");
+            String parameters = "";
+            parameters += " " + agent_count;
+            parameters += " " + init_sick;
+            parameters += " " + agent_speed;
+            parameters += " " + contamination_radius;
+            parameters += " " + contamination_prob;
+            parameters += " " + min_contamination_length;
+            parameters += " " + max_contamination_length;
+            create_containers_message.setContent("create " + remote_container_count + parameters);
+            create_containers_message.addReceiver(remote_manager);
+            System.out.println("Sending create container signal");
+            send(create_containers_message);
 
-        for (int i = 0; i < container_count; i++) {
+            // Waiting for confirmation
+            blockingReceive(MessageTemplate.and(
+                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                    MessageTemplate.MatchOntology("confirm_created")));
+        }
 
-            if (i < container_count-remote_container_count) {
-                // Local container
-                container_id = i + 1;
-                container_name = "Container-" + container_id;
+        // Local containers
+        for (int i = remote_container_count; i < container_count; i++) {
+            int container_id = i + 1;
+            String container_name = "Container-" + container_id;
 
+            try {
+                AgentContainer mc = getContainerController();
 
-                try {
-                    AgentContainer mc = getContainerController();
+                // Creating the controller
+                Object[] controller_arguments = new Object[]{
+                        container_name,
+                        true, // gui enabled
+                        agent_count,
+                        init_sick,
+                        agent_speed,
+                        contamination_radius,
+                        contamination_prob,
+                        min_contamination_length,
+                        max_contamination_length
+                };
+                AgentController controllerAgent = mc.createNewAgent("Controller-" + container_id, "agents.ControllerAgent", controller_arguments);
+                controllerAgent.start();
 
-                    // Creating the controller
-                    Object[] controller_arguments = new Object[]{
-                            container_id,
-                            agent_count,
-                            init_sick,
-                            agent_speed,
-                            contamination_radius,
-                            contamination_prob,
-                            min_contamination_length,
-                            max_contamination_length
-                    };
-                    AgentController controllerAgent = mc.createNewAgent("Controller-" + (i + 1), "agents.ControllerAgent", controller_arguments);
-                    controllerAgent.start();
-
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            }
-            else {
-                // Remote containers
-                container_id = i + 1 - remote_container_count;
-                container_name = "Container-" + container_id;
-
-                if (!remote_launched) launchRemote();
-
-                // Send signal to remote manager to create containers
-
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }
@@ -351,6 +359,7 @@ public class ManagerAgent extends Agent {
 
             // Handle end of process
             if (done_containers == container_count){
+                System.out.println("here");
                 exit_confirmation_window.setTitle("Simulation done");
                 exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
                 exit_confirmation_window.setVisible(true);
@@ -404,29 +413,36 @@ public class ManagerAgent extends Agent {
             channelExec.setInputStream(null);
             channelExec.setErrStream(System.err);
 
-            InputStream in=channelExec.getInputStream();
+            remote_input_stream = channelExec.getInputStream();
 
             channelExec.connect(5000);
 
-            // TODO: print in cyclic loop
-            byte[] tmp=new byte[1024];
-            while(true){
-                while(in.available()>0){
-                    int i=in.read(tmp, 0, 1024);
-                    if(i<0)break;
-                    System.out.print(new String(tmp, 0, i));
+            // Added cycle behavior to read output of ssh connection execution
+            addBehaviour(new CyclicBehaviour() {
+                @Override
+                public void action() {
+                    try {
+                        byte[] tmp=new byte[1024];
+                        while(true){
+                            if (!(remote_input_stream.available()>0)) break;
+                            int i= 0;
+                            i = remote_input_stream.read(tmp, 0, 1024);
+                            if(i<0)break;
+                            System.out.print("[REMOTE] " + new String(tmp, 0, i));
+                        }
+                        if(channelExec.isClosed()){
+                            if(remote_input_stream.available()>0) return;
+                            System.out.println("[REMOTE] " + "exit-status: "+channelExec.getExitStatus());
+                            removeBehaviour(this);
+                        }
+//                        try{Thread.sleep(1000);}catch(Exception ee){}
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
-                if(channelExec.isClosed()){
-                    if(in.available()>0) continue;
-                    System.out.println("exit-status: "+channelExec.getExitStatus());
-                    break;
-                }
-                try{Thread.sleep(1000);}catch(Exception ee){}
-            }
+            });
 
             // Wait for remote manager to settle
-
-            System.out.println("going to sleep for a second");
             sleep(1000);
 
             // Find the remote manager agents
@@ -439,21 +455,25 @@ public class ManagerAgent extends Agent {
             do {
                 result = DFService.search(this_agent, template);
             } while (result.length == 0);
-            System.out.println("Remote manager settled and retrieved");
             remote_manager = result[0].getName();
 
             // Send intro
-            System.out.println("sending intro to remote");
             ACLMessage intro_message = new ACLMessage(ACLMessage.INFORM);
             intro_message.setOntology("intro");
             intro_message.addReceiver(remote_manager);
             send(intro_message);
 
+            blockingReceive(MessageTemplate.and(
+                    MessageTemplate.MatchPerformative(ACLMessage.INFORM),
+                    MessageTemplate.MatchOntology("ready")));
+            System.out.println("Received ready from remote manager");
+
+            // finalization
+            remote_launched = true;
+
         } catch (JSchException | FIPAException e) {
             e.printStackTrace();
-        } catch (InterruptedException | SftpException e) {
-            throw new RuntimeException(e);
-        } catch (IOException e) {
+        } catch (InterruptedException | SftpException | IOException e) {
             throw new RuntimeException(e);
         }
     }
