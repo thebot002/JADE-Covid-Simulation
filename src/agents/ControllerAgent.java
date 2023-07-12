@@ -4,6 +4,8 @@ import jade.core.AID;
 import jade.core.Agent;
 import jade.core.ProfileImpl;
 import jade.core.Runtime;
+import jade.core.behaviours.CyclicBehaviour;
+import jade.util.leap.Iterator;
 import jade.wrapper.AgentContainer;
 import jade.core.behaviours.TickerBehaviour;
 import jade.lang.acl.ACLMessage;
@@ -47,19 +49,28 @@ public class ControllerAgent extends Agent {
     private double[][] agent_positions;
     private AgentStatus[] agent_statuses;
     private boolean sent_done = false;
+    private boolean to_refresh_receivers = false;
 
     // containers
     private AgentContainer ac;
+    private int controller_count;
 
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
 
     private final MessageTemplate intro_message_template = getMessageTemplate(ACLMessage.INFORM, "intro");
+    private final MessageTemplate manager_go_message_template = getMessageTemplate(ACLMessage.INFORM, "GO");
     private final MessageTemplate status_message_template = getMessageTemplate(ACLMessage.INFORM, "status");
     private final MessageTemplate kill_message_template = getMessageTemplate(ACLMessage.INFORM, "kill");
+    private final MessageTemplate travel_done_message_template = getMessageTemplate(ACLMessage.INFORM, "travel_done");
+    private final MessageTemplate controller_travel_done_message_template = getMessageTemplate(ACLMessage.INFORM, "controller_travel_done");
     private final MessageTemplate travel_request_message_template = getMessageTemplate(ACLMessage.REQUEST, "travel");
     private ACLMessage move_go_msg;
+    private ACLMessage travel_msg;
     private ACLMessage done_message;
+    private ACLMessage controller_travel_done_message;
+    private ACLMessage kill_msg;
+    private ACLMessage force_kill_message;
 
     // Panels
     private JFrame container_frame;
@@ -100,8 +111,14 @@ public class ControllerAgent extends Agent {
         ACLMessage manager_intro_message = blockingReceive(intro_message_template);
         AID manager_agent = manager_intro_message.getSender();
 
+        // Retrieving other controllers
+        AID[] other_controllers = getAgentsAtService(this, "controller-group", getAID());
+        controller_count = other_controllers.length + 1;
+        controller_travel_done_message = createMessage(ACLMessage.INFORM, "controller_travel_done", other_controllers);
+
         // Create done message to manager
         done_message = createMessage(ACLMessage.INFORM, "done", manager_agent);
+        force_kill_message = createMessage(ACLMessage.INFORM, "korce_kill", manager_agent);
 
         // GENERATION OF WANDERER AGENTS
         generateAgents();
@@ -117,8 +134,10 @@ public class ControllerAgent extends Agent {
         // Retrieving initial agent positions and statuses
         processReplies(replies);
 
-        // Setup move go message
+        // Setup go and travel message
         move_go_msg = createMessage(ACLMessage.INFORM, "GO", wanderer_agents);
+        travel_msg = createMessage(ACLMessage.INFORM, "travel", wanderer_agents);
+        kill_msg = createMessage(ACLMessage.INFORM, "kill", wanderer_agents);
 
         // Create graphical elements
         if (gui_enabled) {
@@ -131,26 +150,28 @@ public class ControllerAgent extends Agent {
         manager_ready_message.setContent(container_name);
         send(manager_ready_message);
 
-        blockingReceive(getMessageTemplate(ACLMessage.INFORM, "GO"));
-
         // Initialize loop
-        TickerBehaviour loop_behavior = new TickerBehaviour(this, 100) {
+        CyclicBehaviour loop_behavior = new CyclicBehaviour() {
             @Override
-            protected void onTick() {
-
-                // Tracking time
-                long start_time = System.currentTimeMillis();
-
+            public void action() {
+                // If kill message is received, perform doDelete()
                 ACLMessage message = receive(kill_message_template);
                 if (message != null) doDelete();
 
-                // Sending go
-                send(move_go_msg);
+                // Receive go from manager
+                ACLMessage manager_go = receive(manager_go_message_template);
+                if (manager_go == null) return;
 
-                // Receive new locations
-                String[] replies = new String[agent_count];
-                int received_replies = 0;
-                while (received_replies < agent_count) {
+                // Sending travel signal to all agents
+                send(travel_msg);
+
+                // Travel loop
+                int agents_done_travel_step = 0;
+                int controllers_done_with_travel = 0;
+                boolean controller_sent_done = false;
+                int delta_agent_count = 0;
+
+                while (controllers_done_with_travel < controller_count) {
                     // Receive travel request
                     ACLMessage travel_request_message = receive(travel_request_message_template);
 
@@ -163,45 +184,68 @@ public class ControllerAgent extends Agent {
                         if (Objects.equals(action, "leave")) {
                             // Remove agent from the list of receivers of the go message of this controller
                             move_go_msg.removeReceiver(traveller);
-                            agent_count--;
+                            travel_msg.removeReceiver(traveller);
+                            delta_agent_count--;
                         }
                         else if (Objects.equals(action, "arrive")) {
                             travel_agreement_message.setContent(container_name);
                             move_go_msg.addReceiver(traveller);
-                            agent_count++;
+                            travel_msg.addReceiver(traveller);
+                            delta_agent_count++;
+
                         }
+                        to_refresh_receivers = true;
+
                         send(travel_agreement_message);
                         continue;
                     }
 
-                    // Done information
-                    ACLMessage done_message = receive(status_message_template);
+                    // check if some other is done with their travel step
+                    if (receive(controller_travel_done_message_template) != null) controllers_done_with_travel++;
 
-                    if (done_message != null) {
-                        replies[received_replies] = done_message.getContent();
-                        received_replies++;
+                    // Check if agent is done with travelling
+                    ACLMessage agent_done_travel_message = receive(travel_done_message_template);
+                    if (agent_done_travel_message != null) agents_done_travel_step++;
+
+                    // Check if all agents of this controller are done, if so, send message to other containers
+                    if (!controller_sent_done && (agents_done_travel_step == agent_count)) {
+                        controllers_done_with_travel++;
+                        send(controller_travel_done_message);
+                        controller_sent_done = true;
                     }
                 }
 
-                if (DEBUG) {
-                    System.out.println("New locations");
-                    for (String repl : replies) System.out.println(repl);
+                // If some travels happened, we change the amount of agents
+                if (delta_agent_count != 0){
+                    agent_count += delta_agent_count;
+
+                    agent_positions = new double[agent_count][2];
+                    agent_statuses = new AgentStatus[agent_count];
                 }
+
+                // If the wanderers have to refresh their neighbourhood list a refresh content is sent out
+                if (to_refresh_receivers) {
+                    move_go_msg.setContent("refresh");
+                    to_refresh_receivers = false;
+                }
+                else move_go_msg.setContent(null);
+
+                // Sending go
+                send(move_go_msg);
+
+                // Receive new locations and statuses
+                String[] replies = new String[agent_count];
+                for (int i = 0; i < agent_count; i++) {
+                    replies[i] = blockingReceive(status_message_template).getContent();
+                }
+                processReplies(replies);
 
                 // Redraw container frame
-                processReplies(replies);
-                if (gui_enabled)wandererEnvironmentPanel.repaint();
+                if (gui_enabled) wandererEnvironmentPanel.repaint();
 
-                // Process if simulation is done
-                if (!sent_done && sick_agent_count == 0) {
-                    done_message.setContent("container done");
-                    send(done_message);
-                    sent_done = !sent_done;
-                }
-
-                // Tracking time end
-                long duration_s = System.currentTimeMillis() - start_time;
-                if (DEBUG) System.out.println("[" + container_name + "] Iteration done in (ms): " + duration_s);
+                // Send done message to manager with sick agents count
+                done_message.setContent(String.valueOf(sick_agent_count));
+                send(done_message);
 
                 if (DEBUG && !sent_done) System.out.println("[" + container_name + "] " + sick_agent_count);
             }
@@ -265,8 +309,7 @@ public class ControllerAgent extends Agent {
     @Override
     public void doDelete() {
         // Sending auto-destruct signal to wanderers
-        move_go_msg.setContent("delete");
-        send(move_go_msg);
+        send(kill_msg);
 
         int confirmations = 0;
         for (int i = 0; i < agent_count; i++) {
@@ -370,8 +413,7 @@ public class ControllerAgent extends Agent {
         JButton exit_button = new JButton("Exit simulation");
         exit_button.addActionListener(e -> {
             exit_confirmation_window.setVisible(false);
-            done_message.setContent("force");
-            send(done_message);
+            send(force_kill_message);
         });
         exit_confirmation_window.add(exit_button);
 

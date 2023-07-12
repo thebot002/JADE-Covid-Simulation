@@ -4,6 +4,7 @@ import com.jcraft.jsch.*;
 
 import jade.core.*;
 import jade.core.behaviours.CyclicBehaviour;
+import jade.core.behaviours.TickerBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.util.leap.ArrayList;
@@ -59,18 +60,17 @@ public class ManagerAgent extends Agent {
     // Controller agents
     private AID[] controller_agents;
 
-    // Runtime variables
-    private int done_containers = 0;
-
     // Graphics
     JFrame exit_confirmation_window;
     JLabel exit_confirmation_info;
 
-    // Message templates
+    // Messaging
     private final MessageTemplate done_message_template = getMessageTemplate(ACLMessage.INFORM,"done" );
+    private final MessageTemplate force_kill_message_template = getMessageTemplate(ACLMessage.INFORM, "korce_kill");
+    private ACLMessage go_message;
 
     // Behaviors
-    private final WaitDoneRequest done_request_behavior = new WaitDoneRequest();
+    private final managerLoop simulation_loop_behavior = new managerLoop();
 
     // Remote variables
     private boolean remote_launched = false;
@@ -217,10 +217,9 @@ public class ManagerAgent extends Agent {
             for (int i = 0; i < container_count; i++) blockingReceive(ready_message_template);
 
             // Send back go to all
-            ACLMessage go_message = createMessage(ACLMessage.INFORM, "GO", controller_agents);
-            send(go_message);
+            go_message = createMessage(ACLMessage.INFORM, "GO", controller_agents);
 
-            this_agent.addBehaviour(done_request_behavior);
+            this_agent.addBehaviour(simulation_loop_behavior);
         }
     }
 
@@ -252,6 +251,11 @@ public class ManagerAgent extends Agent {
         if (max_contamination_length < min_contamination_length){
             System.out.println("max contamination length can't be larger than min contamination length");
             return false;
+        }
+
+        if (container_count == 1 && travel_chance > 0){
+            System.out.println("Only one container available, setting travel chance to zero");
+            travel_chance = -1.0;
         }
 
         return true;
@@ -340,26 +344,47 @@ public class ManagerAgent extends Agent {
         exit_confirmation_window.setResizable(false);
     }
 
-    private class WaitDoneRequest extends CyclicBehaviour {
+    private class managerLoop extends TickerBehaviour {
+        public managerLoop() {
+            super(this_agent, 100);
+        }
 
         @Override
-        public void action() {
-            ACLMessage message = blockingReceive(done_message_template);
-            if (message == null) return;
-
-            String message_content = message.getContent();
-            switch (message_content) {
-                case "container done": done_containers += 1; break;
-                case "force": System.out.println("Force deletion"); deleteContainers(); return;
-                case "container back": done_containers -= 1; break;
+        protected void onTick() {
+            // Process force kill message
+            ACLMessage force_kill = receive(force_kill_message_template);
+            if (force_kill != null) {
+                deleteContainers();
+                return;
             }
 
-            // Handle end of process
-            if (done_containers == container_count){
-                exit_confirmation_window.setTitle("Simulation done");
+            // Tracking time
+            long start_time = System.currentTimeMillis();
+
+            // Sending go to all controllers
+            send(go_message);
+
+            // Receive back done from all controllers
+            int done_controllers = 0;
+            for (int i = 0; i < container_count; i++) {
+                ACLMessage done_response = blockingReceive(done_message_template);
+
+                int sick_count = Integer.parseInt(done_response.getContent());
+                if (sick_count == 0) done_controllers++;
+            }
+
+            // Process end
+            if (done_controllers == container_count) {
+                System.out.println("Simulation is done, stopping simulation loop.");
+                this_agent.removeBehaviour(simulation_loop_behavior);
+
                 exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
                 exit_confirmation_window.setVisible(true);
             }
+
+            // Tracking time end
+            long duration_s = System.currentTimeMillis() - start_time;
+            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
         }
     }
 

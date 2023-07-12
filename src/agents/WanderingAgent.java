@@ -6,7 +6,9 @@ import jade.core.ContainerID;
 import jade.core.behaviours.CyclicBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
+import jade.util.leap.Iterator;
 
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.Random;
 
@@ -24,7 +26,7 @@ public class WanderingAgent extends Agent {
     private final int MAX_DIR_CHANGE = 20;
 
     // Neighbours
-    private AID[] neighbour_agents;
+    private int neighbour_count;
 
     // Status variables
     private String status;
@@ -47,6 +49,18 @@ public class WanderingAgent extends Agent {
     private AID controller_agent;
     private AID[] other_controller_agents;
     private AID travel_controller_agent;
+
+    // Messages
+    private final MessageTemplate travel_message_template = getMessageTemplate(ACLMessage.INFORM, "travel");
+    private final MessageTemplate go_message_template = getMessageTemplate(ACLMessage.INFORM, "GO");
+    private final MessageTemplate exhale_message_template = getMessageTemplate(ACLMessage.INFORM,"exhale");
+    private final MessageTemplate kill_message_template = getMessageTemplate(ACLMessage.INFORM,"kill");
+    private ACLMessage travel_done_message;
+    private ACLMessage exhale_message;
+    private ACLMessage status_message;
+
+    // other
+    private final Random rand = new Random();
 
     // DEBUG
     private final boolean DEBUG = false;
@@ -78,7 +92,6 @@ public class WanderingAgent extends Agent {
         registerAgentAtService(this, container_name + "-wanderer-group");
 
         // Define initial position
-        Random rand = new Random();
         double init_x = (0.1 + (0.8 * rand.nextDouble())) * this.MAX_X; // between 10 and 90 to not spawn on edge
         double init_y = (0.1 + (0.8 * rand.nextDouble())) * this.MAX_Y; // between 10 and 90 to not spawn on edge
         this.position = new double[]{init_x, init_y};
@@ -91,26 +104,24 @@ public class WanderingAgent extends Agent {
         controller_agent = ready_msg.getSender();
         if(DEBUG) System.out.println("[" + getName() + "]" + " received ready from " + controller_agent.getName());
 
-        // Setup status message
-        ACLMessage status_message = createMessage(ACLMessage.INFORM, "status", controller_agent);
+        // Setup travel_done and status message
+        travel_done_message = createMessage(ACLMessage.INFORM, "travel_done", controller_agent);
+        status_message = createMessage(ACLMessage.INFORM, "status", controller_agent);
 
         // Get other agents
-        neighbour_agents = getAgentsAtService(this,container_name + "-wanderer-group", getAID());
+        AID[] neighbour_agents = getAgentsAtService(this,container_name + "-wanderer-group", getAID());
+        neighbour_count = neighbour_agents.length;
         if (DEBUG) {
             System.out.println(getName() + ": found agents:");
             for (AID agent: neighbour_agents) System.out.println("\t" + agent.getName());
         }
 
         // Setup exhale message and template
-        ACLMessage exhale_message = createMessage(ACLMessage.INFORM, "exhale", neighbour_agents);
-        MessageTemplate exhale_message_template = getMessageTemplate(ACLMessage.INFORM,"exhale");
+        exhale_message = createMessage(ACLMessage.INFORM, "exhale", neighbour_agents);
 
         // Reply to the ready with initial location
         status_message.setContent(statusString());
         send(status_message);
-
-        // Receive first go from controller meaning all controllers are ready
-        MessageTemplate go_message_template = getMessageTemplate(ACLMessage.INFORM, "GO");
 
         // Retrieving all other controllers for potential travels
         other_controller_agents = getAgentsAtService(this, "controller-group", controller_agent);
@@ -119,62 +130,93 @@ public class WanderingAgent extends Agent {
         addBehaviour(new CyclicBehaviour() {
             /*
             Steps
-            1. Receive Move GO
-            1.1 Delete if receives signal
-            2.0 Potential Travel
-            2.1 Move
-            3. Exhale message to all neighbour agents
-            4. Inhale message from all neighbour agents
-            5. New health status
-            6. Report back status and new location
+            0. Handling deletion
+            2. Receive travel GO
+            3. Travel action
+            4. Report travel action done
+            5. Receive Move GO
+            6. Move
+            7. Exhale message to all neighbour agents
+            8. Inhale message from all neighbour agents
+            9. Report back status and new location
              */
 
             @Override
             public void action() {
-                Random rand = new Random();
-
-                // 1. Receive GO
-                ACLMessage go_msg = blockingReceive(go_message_template);
-
-                if (DEBUG) System.out.println("[" + getName() + "]" + " Received GO");
-
-                // 1.1
-                if (Objects.equals(go_msg.getContent(), "delete")){
+                // 0. Handling deletion
+                ACLMessage kill_message = receive(kill_message_template);
+                if (kill_message != null){
                     status_message.setContent("deleted");
                     send(status_message);
                     doDelete();
                     return;
                 }
 
-                // 2.0 Potential travel
+                // 1. Receive travel go
+                blockingReceive(travel_message_template);
+
+                // 2. Potentially travel
+                AID new_controller_agent = null;
                 if (!is_on_travel) {
                     if (rand.nextDouble() < travel_chance) {
                         int other_controller_index = rand.nextInt(other_controller_agents.length);
                         travel_controller_agent = other_controller_agents[other_controller_index];
                         travel(controller_agent, travel_controller_agent);
-
+                        new_controller_agent = travel_controller_agent;
                         is_on_travel = true;
-                        return;
                     }
                 }
                 else {
                     // Check whether to return
                     travel_length++;
-                    if (travel_length > rand.nextDouble() * average_travel_duration * 2){
+                    double return_chance = (rand.nextDouble() * average_travel_duration * 2);
+                    if (travel_length > return_chance){
                         travel(travel_controller_agent, controller_agent);
-                        System.out.println("[" + getName() + "] Travelling back");
+                        new_controller_agent = controller_agent;
+                        is_on_travel = false;
                     }
                 }
 
-                // 2.1 Move
+                // 3. Send travel phase done
+                send(travel_done_message);
+
+                if (new_controller_agent != null) {
+                    status_message.clearAllReceiver();
+                    status_message.addReceiver(new_controller_agent);
+
+                    travel_done_message.clearAllReceiver();
+                    travel_done_message.addReceiver(new_controller_agent);
+                }
+
+                // 4. Receive GO
+                ACLMessage go_msg = blockingReceive(go_message_template);
+                if (DEBUG) System.out.println("[" + getName() + "]" + " Received GO");
+
+                // 1.1 If refresh is receiver in go message, the list of wanderers needs to be updated
+                if (Objects.equals(go_msg.getContent(), "refresh")) {
+                    Iterator receivers_iterator = go_msg.getAllReceiver();
+                    neighbour_count = 0;
+                    exhale_message.clearAllReceiver();
+
+                    while (receivers_iterator.hasNext()) {
+                        AID receiver = (AID) receivers_iterator.next();
+
+                        if (!Objects.equals(receiver, getAID())) {
+                            neighbour_count++;
+                            exhale_message.addReceiver(receiver);
+                        }
+                    }
+                }
+
+                // 5. Move
                 move();
 
-                // 3. Exhale message to all neighbours
+                // 6. Exhale message to all neighbours
                 exhale_message.setContent(statusString());
                 send(exhale_message);
 
-                // 4. Inhale message from all neighbours
-                for (int i = 0; i < neighbour_agents.length; i++) {
+                // 7. Inhale message from all neighbours
+                for (int i = 0; i < neighbour_count; i++) {
                     ACLMessage inhale_message = blockingReceive(exhale_message_template);
                     String inhale_content = inhale_message.getContent();
 
@@ -198,7 +240,7 @@ public class WanderingAgent extends Agent {
                     }
                 }
 
-                // 5. If sick check if switch back to healthy
+                // 8. If sick check if switch back to healthy
                 if (Objects.equals(status, "sick")) {
                     sickness_length++;
                     if (sickness_length >= min_contamination_length){
@@ -208,9 +250,23 @@ public class WanderingAgent extends Agent {
                     }
                 }
 
-                // 6. Report back status
+                // 9. Report back status
                 status_message.setContent(statusString());
                 send(status_message);
+
+                // 10. Finally perform physical travel of container if need be
+                if (new_controller_agent != null){
+                    String[] controller_name_components = new_controller_agent.getName().split("[@:/]");
+                    String container_name = controller_name_components[0].replace("Controller","Container");
+                    String ip = controller_name_components[1];
+                    String port = controller_name_components[2];
+
+                    ContainerID cID = new ContainerID();
+                    cID.setName(container_name); //Destination container
+                    cID.setAddress(ip); //IP of the host of the container
+                    cID.setPort(port); //port associated with Jade
+                    doMove(cID);
+                }
             }
         });
 
@@ -218,7 +274,6 @@ public class WanderingAgent extends Agent {
 
     private void move(){
         // Altering direction
-        Random rand = new Random();
         int headingChange = (int)((rand.nextDouble()*(this.MAX_DIR_CHANGE*2)) - this.MAX_DIR_CHANGE);
         this.headingDegrees += headingChange;
         this.headingDegrees %= 360;
@@ -252,7 +307,7 @@ public class WanderingAgent extends Agent {
         send(travel_leave_request_message);
 
         // Send request to target controller
-        ACLMessage travel_request_message = createMessage(ACLMessage.REQUEST, "travel", from_controller);
+        ACLMessage travel_request_message = createMessage(ACLMessage.REQUEST, "travel", to_controller);
         travel_request_message.setContent("arrive");
         send(travel_request_message);
 
@@ -263,17 +318,8 @@ public class WanderingAgent extends Agent {
             ACLMessage answer = blockingReceive(agreement_message_template);
             if (answer != null && answer.getContent() != null && answer.getContent().length() > 0) target_container_name = answer.getContent();
         }
-        if (DEBUG) System.out.println("[" + getName() + "] Travelling to " + target_container_name);
 
-        // perform the move
-        ContainerID cID = new ContainerID();
-        cID.setName(target_container_name); //Destination container
-        cID.setAddress(host_ip); //IP of the host of the container
-        cID.setPort("1099"); //port associated with Jade
-        doMove(cID);
-
-        // Send notice to all neighbours
-
-        // Get new neighbours
+//        if (DEBUG)
+        System.out.println("[" + getName() + "] Travelled to " + target_container_name);
     }
 }
