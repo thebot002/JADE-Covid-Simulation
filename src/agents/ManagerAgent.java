@@ -78,7 +78,7 @@ public class ManagerAgent extends Agent {
     private InputStream remote_input_stream;
 
     //debug
-    private final boolean DEBUG = false;
+    private final boolean DEBUG = true;
 
     @Override
     protected void setup() {
@@ -466,7 +466,11 @@ public class ManagerAgent extends Agent {
             sleep(1000);
 
             // Find the remote manager agents
-            remote_manager = Objects.requireNonNull(getAgentsAtService(this, "remote-manager"))[0];
+            AID[] agents;
+            do {
+                agents = getAgentsAtService(this, "remote-manager");
+            } while (agents == null || agents.length == 0);
+            remote_manager = agents[0];
 
             // Send intro
             ACLMessage intro_message = createMessage(ACLMessage.INFORM, "intro", remote_manager);
