@@ -185,12 +185,14 @@ public class ControllerAgent extends Agent {
                             // Remove agent from the list of receivers of the go message of this controller
                             move_go_msg.removeReceiver(traveller);
                             travel_msg.removeReceiver(traveller);
+                            kill_msg.removeReceiver(traveller);
                             delta_agent_count--;
                         }
                         else if (Objects.equals(action, "arrive")) {
                             travel_agreement_message.setContent(container_name);
                             move_go_msg.addReceiver(traveller);
                             travel_msg.addReceiver(traveller);
+                            kill_msg.addReceiver(traveller);
                             delta_agent_count++;
 
                         }
@@ -308,6 +310,8 @@ public class ControllerAgent extends Agent {
 
     @Override
     public void doDelete() {
+        if(DEBUG) System.out.println("[" + getName() + "] Received kill signal.");
+
         // Sending auto-destruct signal to wanderers
         send(kill_msg);
 

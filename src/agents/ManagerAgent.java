@@ -78,7 +78,7 @@ public class ManagerAgent extends Agent {
     private InputStream remote_input_stream;
 
     //debug
-    private final boolean DEBUG = true;
+    private final boolean DEBUG = false;
 
     @Override
     protected void setup() {
@@ -378,6 +378,7 @@ public class ManagerAgent extends Agent {
                 System.out.println("Simulation is done, stopping simulation loop.");
                 this_agent.removeBehaviour(simulation_loop_behavior);
 
+                exit_confirmation_window.setTitle("Simulation done.");
                 exit_confirmation_info.setText("The simulation is done, exit or stay to observe results:");
                 exit_confirmation_window.setVisible(true);
             }

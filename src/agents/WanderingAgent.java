@@ -146,6 +146,8 @@ public class WanderingAgent extends Agent {
                 // 0. Handling deletion
                 ACLMessage kill_message = receive(kill_message_template);
                 if (kill_message != null){
+                    if(DEBUG) System.out.println("[" + getName() + "] Received kill signal.");
+
                     status_message.setContent("deleted");
                     send(status_message);
                     doDelete();
@@ -153,7 +155,8 @@ public class WanderingAgent extends Agent {
                 }
 
                 // 1. Receive travel go
-                blockingReceive(travel_message_template);
+                ACLMessage travel_go_message = receive(travel_message_template);
+                if (travel_go_message == null) return;
 
                 // 2. Potentially travel
                 AID new_controller_agent = null;
