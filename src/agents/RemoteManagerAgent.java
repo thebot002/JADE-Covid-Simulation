@@ -58,7 +58,6 @@ public class RemoteManagerAgent extends Agent {
                             // Creating the controller
                             Object[] controller_arguments = new Object[]{
                                     container_name,
-                                    false, // gui enabled
                                     agent_count,
                                     init_sick,
                                     agent_speed,

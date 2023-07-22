@@ -8,7 +8,6 @@ import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.util.leap.Iterator;
 
-import java.util.ArrayList;
 import java.util.Objects;
 import java.util.Random;
 
@@ -35,7 +34,6 @@ public class WanderingAgent extends Agent {
     private int travel_length = 0;
 
     // common agent variables
-    private String host_ip;
     private String container_name;
     private double speed;
     private int contamination_radius;
@@ -75,16 +73,15 @@ public class WanderingAgent extends Agent {
             doDelete();
         }
 
-        this.host_ip = (String) args[0];
-        this.container_name = (String) args[1];
-        this.status = (String) args[2];
-        this.speed = ((double) args[3]);
-        this.contamination_radius = ((int) args[4]);
-        this.contamination_probability = ((double) args[5]);
-        this.min_contamination_length = ((int) args[6]);
-        this.max_contamination_length = ((int) args[7]);
-        this.travel_chance = ((double) args[8]);
-        this.average_travel_duration = ((int) args[9]);
+        this.container_name = (String) args[0];
+        this.status = (String) args[1];
+        this.speed = ((double) args[2]);
+        this.contamination_radius = ((int) args[3]);
+        this.contamination_probability = ((double) args[4]);
+        this.min_contamination_length = ((int) args[5]);
+        this.max_contamination_length = ((int) args[6]);
+        this.travel_chance = ((double) args[7]);
+        this.average_travel_duration = ((int) args[8]);
 
         if (DEBUG) System.out.println("[" + getName() + "]" + " ready with status " + this.status);
 

@@ -18,7 +18,6 @@ import static agents.Util.*;
 
 public class GUIAgent extends Agent {
 
-    private JPanel wandererEnvironmentPanel;
     private final int MAX_X = 100;
     private final int MAX_Y = 100;
 

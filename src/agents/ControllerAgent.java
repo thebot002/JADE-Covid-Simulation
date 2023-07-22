@@ -38,7 +38,6 @@ public class ControllerAgent extends Agent {
 
     // Agents variables
     private AID[] wanderer_agents;
-    private boolean sent_done = false;
     private boolean to_refresh_receivers = false;
 
     // containers
@@ -64,22 +63,22 @@ public class ControllerAgent extends Agent {
 
         // Retrieving initial status and parameters
         Object[] args = getArguments();
-        if (args.length < 11) {
+        if (args.length < 10) {
             System.out.println("Not enough arguments, self destruction");
             doDelete();
         }
 
         // Setup variables
         container_name = ((String) args[0]);
-        agent_count = ((int) args[2]);
-        init_sick = ((int) args[3]);
-        agent_speed = ((double) args[4]);
-        contamination_radius = ((int) args[5]);
-        contamination_prob = ((double) args[6]);
-        min_contamination_length = ((int) args[7]);
-        max_contamination_length = ((int) args[8]);
-        travel_chance = ((double) args[9]);
-        average_travel_duration = ((int) args[10]);
+        agent_count = ((int) args[1]);
+        init_sick = ((int) args[2]);
+        agent_speed = ((double) args[3]);
+        contamination_radius = ((int) args[4]);
+        contamination_prob = ((double) args[5]);
+        min_contamination_length = ((int) args[6]);
+        max_contamination_length = ((int) args[7]);
+        travel_chance = ((double) args[8]);
+        average_travel_duration = ((int) args[9]);
 
         // Registering to the Controller group service
         registerAgentAtService(this, "controller-group");
@@ -228,7 +227,7 @@ public class ControllerAgent extends Agent {
                 done_message.setContent(String.valueOf(sick_agent_count));
                 send(done_message);
 
-                if (DEBUG && !sent_done) System.out.println("[" + container_name + "] " + sick_agent_count);
+                if (DEBUG) System.out.println("[" + container_name + "] " + sick_agent_count);
             }
         };
 
@@ -273,7 +272,6 @@ public class ControllerAgent extends Agent {
         Runtime runtime = Runtime.instance();
         ProfileImpl pc = new ProfileImpl(false);
         pc.setParameter(ProfileImpl.CONTAINER_NAME, container_name);
-//        pc.setParameter(ProfileImpl.MAIN_HOST, host_ip);
 
         ac = runtime.createAgentContainer(pc);
         try {ac.start();} catch (ControllerException e) {throw new RuntimeException(e);}
@@ -298,7 +296,6 @@ public class ControllerAgent extends Agent {
             for (int i=0; i<agent_count; i++){
                 String init_status = arrayContains(sick_indices, i)? "sick": "healthy";
                 AgentController wandererAgent = ac.createNewAgent(container_name + "-Wanderer-" + i, "agents.WanderingAgent", new Object[]{
-                        host_ip,
                         container_name,
                         init_status,
                         agent_speed,
