@@ -73,6 +73,7 @@ public class ManagerAgent extends Agent {
     private final MessageTemplate done_message_template = getMessageTemplate(ACLMessage.INFORM,"done" );
     private final MessageTemplate force_kill_message_template = getMessageTemplate(ACLMessage.INFORM, "korce_kill");
     private ACLMessage go_message;
+    private ACLMessage it_time_info_message;
 
     // Behaviors
     private final managerLoop simulation_loop_behavior = new managerLoop();
@@ -223,8 +224,8 @@ public class ManagerAgent extends Agent {
                         contamination_radius
                 };
 
-                AgentController controllerAgent = mc.createNewAgent("GUI-Agent", "agents.GUIAgent", arguments);
-                controllerAgent.start();
+                AgentController guiAgent = mc.createNewAgent("GUI-Agent", "agents.GUIAgent", arguments);
+                guiAgent.start();
             } catch (Exception except) {
                 except.printStackTrace();
             }
@@ -234,6 +235,7 @@ public class ManagerAgent extends Agent {
                 agents = getAgentsAtService(this_agent, "GUI");
             } while ((agents == null) || (agents.length < 1));
             gui_agent = agents[0];
+            it_time_info_message = createMessage(ACLMessage.INFORM, "it_time", gui_agent);
 
             // sending introduction to controllers
             assert controller_agents != null;
@@ -436,8 +438,12 @@ public class ManagerAgent extends Agent {
             }
 
             // Tracking time end
-            long duration_s = System.currentTimeMillis() - start_time;
-            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
+            long duration_ms = System.currentTimeMillis() - start_time;
+            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_ms);
+
+            // Send this info to GUI
+            it_time_info_message.setContent(String.valueOf(duration_ms));
+            send(it_time_info_message);
         }
     }
 
