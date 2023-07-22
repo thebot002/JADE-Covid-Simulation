@@ -22,7 +22,7 @@ public class MainContainer {
         try {
             Runtime runtime = Runtime.instance();
             Properties properties = new ExtendedProperties();
-            properties.setProperty(Profile.GUI, "true");
+            properties.setProperty(Profile.GUI, "false");
             properties.setProperty("jade_domain_df_autocleanup", "true");
             if ((args.length > 0) && Objects.equals(args[0], "remote_support")) properties.setProperty(ProfileImpl.MAIN_HOST, "10.8.0.2");
             ProfileImpl pc = new ProfileImpl(properties);

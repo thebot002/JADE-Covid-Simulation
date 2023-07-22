@@ -59,10 +59,12 @@ public class ManagerAgent extends Agent {
 
     // Controller agents
     private AID[] controller_agents;
+    private AID gui_agent;
 
     // Graphics
-    JFrame exit_confirmation_window;
-    JLabel exit_confirmation_info;
+    private JFrame menuFrame;
+    private JFrame exit_confirmation_window;
+    private JLabel exit_confirmation_info;
 
     // Messaging
     private final MessageTemplate done_message_template = getMessageTemplate(ACLMessage.INFORM,"done" );
@@ -88,16 +90,16 @@ public class ManagerAgent extends Agent {
     }
 
     private void createMenuWindow(){
-        JFrame frame = new JFrame();
-        frame.setTitle("COVID Sim - Menu");
-        frame.setLocation(100,100);
-        frame.setSize(new Dimension(400,420));
+        menuFrame = new JFrame();
+        menuFrame.setTitle("COVID Sim - Menu");
+        menuFrame.setSize(new Dimension(400,420));
+        menuFrame.setLocationRelativeTo(null);
 
         // Creation of content pane inside
         JPanel contentFrame = new JPanel();
         Border padding = BorderFactory.createEmptyBorder(10, 10, 10, 10);
         contentFrame.setBorder(padding);
-        frame.add(contentFrame);
+        menuFrame.add(contentFrame);
 
         // Options pannel
         JPanel options = new JPanel();
@@ -173,9 +175,9 @@ public class ManagerAgent extends Agent {
         contentFrame.add(startButton, BorderLayout.SOUTH);
 
         // Finalization of frame
-        frame.setVisible(true);
-        frame.setResizable(false);
-        frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        menuFrame.setVisible(true);
+        menuFrame.setResizable(false);
+        menuFrame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
     }
 
     private class StartAction implements ActionListener {
@@ -198,18 +200,42 @@ public class ManagerAgent extends Agent {
 
             createSubContainers();
 
-            try {sleep(1000);} catch (InterruptedException ex) { throw new RuntimeException(ex); }
-
             // Find the list of controller agents
-            controller_agents = getAgentsAtService(this_agent, "controller-group");
+            AID[] agents;
+            do {
+                agents = getAgentsAtService(this_agent, "controller-group");
+            } while((agents == null) || (agents.length < container_count));
+            controller_agents = agents;
             if (DEBUG) {
                 System.out.println("Found the following controller agents:");
                 for (AID agent : controller_agents) System.out.println("\t" + agent.getName());
             }
 
+            // create gui agent
+            try {
+                AgentContainer mc = getContainerController();
+
+                Object[] arguments = new Object[]{
+                        container_count,
+                        contamination_radius
+                };
+
+                AgentController controllerAgent = mc.createNewAgent("GUI-Agent", "agents.GUIAgent", arguments);
+                controllerAgent.start();
+            } catch (Exception except) {
+                except.printStackTrace();
+            }
+
+            // receive created gui
+            do {
+                agents = getAgentsAtService(this_agent, "GUI");
+            } while ((agents == null) || (agents.length < 1));
+            gui_agent = agents[0];
+
             // sending introduction to controllers
             assert controller_agents != null;
             ACLMessage intro_message = createMessage(ACLMessage.INFORM, "intro", controller_agents);
+            intro_message.addReceiver(gui_agent);
             send(intro_message);
 
             // Waiting for ready from all controllers
@@ -220,6 +246,8 @@ public class ManagerAgent extends Agent {
             go_message = createMessage(ACLMessage.INFORM, "GO", controller_agents);
 
             this_agent.addBehaviour(simulation_loop_behavior);
+
+            menuFrame.setVisible(false);
         }
     }
 
@@ -297,7 +325,7 @@ public class ManagerAgent extends Agent {
                 // Creating the controller
                 Object[] controller_arguments = new Object[]{
                         container_name,
-                        true, // gui enabled
+                        false, // gui enabled
                         agent_count,
                         init_sick,
                         agent_speed,
@@ -336,6 +364,7 @@ public class ManagerAgent extends Agent {
         exit_button.addActionListener(e -> {
             exit_confirmation_window.setVisible(false);
             deleteContainers();
+            menuFrame.setVisible(true);
         });
         exit_confirmation_window.add(exit_button);
 
@@ -355,6 +384,7 @@ public class ManagerAgent extends Agent {
             ACLMessage force_kill = receive(force_kill_message_template);
             if (force_kill != null) {
                 deleteContainers();
+                menuFrame.setVisible(true);
                 return;
             }
 
@@ -385,12 +415,13 @@ public class ManagerAgent extends Agent {
 
             // Tracking time end
             long duration_s = System.currentTimeMillis() - start_time;
-            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
+//            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
         }
     }
 
     private void deleteContainers() {
         ACLMessage kill_message = createMessage(ACLMessage.INFORM, "kill", controller_agents);
+        kill_message.addReceiver(gui_agent);
         send(kill_message);
     }
 

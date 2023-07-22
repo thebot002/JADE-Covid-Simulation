@@ -5,20 +5,13 @@ import jade.core.Agent;
 import jade.core.ProfileImpl;
 import jade.core.Runtime;
 import jade.core.behaviours.CyclicBehaviour;
-import jade.util.leap.Iterator;
 import jade.wrapper.AgentContainer;
-import jade.core.behaviours.TickerBehaviour;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.wrapper.AgentController;
 import jade.wrapper.ControllerException;
 import jade.wrapper.StaleProxyException;
 
-import javax.swing.*;
-import javax.swing.border.Border;
-import java.awt.*;
-import java.awt.event.WindowEvent;
-import java.awt.event.WindowListener;
 import java.util.Objects;
 import java.util.Random;
 
@@ -32,7 +25,6 @@ public class ControllerAgent extends Agent {
     private final boolean DEBUG = false;
 
     private String container_name;
-    private boolean gui_enabled;
     private int agent_count;
     private int sick_agent_count;
     private int init_sick;
@@ -46,17 +38,12 @@ public class ControllerAgent extends Agent {
 
     // Agents variables
     private AID[] wanderer_agents;
-    private double[][] agent_positions;
-    private AgentStatus[] agent_statuses;
     private boolean sent_done = false;
     private boolean to_refresh_receivers = false;
 
     // containers
     private AgentContainer ac;
     private int controller_count;
-
-    private final int MAX_X = 100;
-    private final int MAX_Y = 100;
 
     private final MessageTemplate intro_message_template = getMessageTemplate(ACLMessage.INFORM, "intro");
     private final MessageTemplate manager_go_message_template = getMessageTemplate(ACLMessage.INFORM, "GO");
@@ -70,12 +57,7 @@ public class ControllerAgent extends Agent {
     private ACLMessage done_message;
     private ACLMessage controller_travel_done_message;
     private ACLMessage kill_msg;
-    private ACLMessage force_kill_message;
-
-    // Panels
-    private JFrame container_frame;
-    private WandererEnvironmentPanel wandererEnvironmentPanel;
-    private JFrame exit_confirmation_window;
+    private ACLMessage all_statuses_message;
 
     @Override
     protected void setup() {
@@ -89,7 +71,6 @@ public class ControllerAgent extends Agent {
 
         // Setup variables
         container_name = ((String) args[0]);
-        gui_enabled = ((boolean) args[1]);
         agent_count = ((int) args[2]);
         init_sick = ((int) args[3]);
         agent_speed = ((double) args[4]);
@@ -99,10 +80,6 @@ public class ControllerAgent extends Agent {
         max_contamination_length = ((int) args[8]);
         travel_chance = ((double) args[9]);
         average_travel_duration = ((int) args[10]);
-
-        // Setup agent status and position arrays
-        agent_positions = new double[agent_count][2];
-        agent_statuses = new AgentStatus[agent_count];
 
         // Registering to the Controller group service
         registerAgentAtService(this, "controller-group");
@@ -118,7 +95,6 @@ public class ControllerAgent extends Agent {
 
         // Create done message to manager
         done_message = createMessage(ACLMessage.INFORM, "done", manager_agent);
-        force_kill_message = createMessage(ACLMessage.INFORM, "korce_kill", manager_agent);
 
         // GENERATION OF WANDERER AGENTS
         generateAgents();
@@ -130,20 +106,22 @@ public class ControllerAgent extends Agent {
         // Receive initial locations back
         String[] replies = new String[agent_count];
         for (int i = 0; i < agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
-        
-        // Retrieving initial agent positions and statuses
-        processReplies(replies);
 
         // Setup go and travel message
         move_go_msg = createMessage(ACLMessage.INFORM, "GO", wanderer_agents);
         travel_msg = createMessage(ACLMessage.INFORM, "travel", wanderer_agents);
         kill_msg = createMessage(ACLMessage.INFORM, "kill", wanderer_agents);
 
-        // Create graphical elements
-        if (gui_enabled) {
-            createExitConfirmationWindow();
-            createContainerWindow();
-        }
+        // GUI Agent setup
+        MessageTemplate gui_intro_message_template = getMessageTemplate(ACLMessage.INFORM, "intro");
+        ACLMessage gui_intro_message = blockingReceive(gui_intro_message_template);
+        AID gui_agent = gui_intro_message.getSender();
+        all_statuses_message = createMessage(ACLMessage.INFORM, "statuses", gui_agent);
+
+        // GUI agent sending of statuses
+        String all_replies = String.join("-", replies);
+        all_statuses_message.setContent(all_replies);
+        send(all_statuses_message);
 
         // Send ready and Wait for go from manager
         ACLMessage manager_ready_message = createMessage(ACLMessage.INFORM, "ready", manager_agent);
@@ -218,12 +196,7 @@ public class ControllerAgent extends Agent {
                 }
 
                 // If some travels happened, we change the amount of agents
-                if (delta_agent_count != 0){
-                    agent_count += delta_agent_count;
-
-                    agent_positions = new double[agent_count][2];
-                    agent_statuses = new AgentStatus[agent_count];
-                }
+                if (delta_agent_count != 0) agent_count += delta_agent_count;
 
                 // If the wanderers have to refresh their neighbourhood list a refresh content is sent out
                 if (to_refresh_receivers) {
@@ -237,13 +210,19 @@ public class ControllerAgent extends Agent {
 
                 // Receive new locations and statuses
                 String[] replies = new String[agent_count];
+                sick_agent_count = 0;
                 for (int i = 0; i < agent_count; i++) {
                     replies[i] = blockingReceive(status_message_template).getContent();
-                }
-                processReplies(replies);
 
-                // Redraw container frame
-                if (gui_enabled) wandererEnvironmentPanel.repaint();
+                    String[] status = replies[i].split(";");
+                    AgentStatus agent_status = AgentStatus.fromString(status[2]);
+                    if (agent_status == AgentStatus.SICK) sick_agent_count++;
+                }
+
+                // GUI agent sending of statuses
+                String all_replies = String.join("-", replies);
+                all_statuses_message.setContent(all_replies);
+                send(all_statuses_message);
 
                 // Send done message to manager with sick agents count
                 done_message.setContent(String.valueOf(sick_agent_count));
@@ -254,52 +233,6 @@ public class ControllerAgent extends Agent {
         };
 
         addBehaviour(loop_behavior);
-    }
-    
-    private void processReplies(String[] replies){
-        sick_agent_count = 0;
-        for (int i=0; i<agent_count; i++) {
-            String[] status = replies[i].split(";");
-            agent_positions[i][0] = Double.parseDouble(status[0]);
-            agent_positions[i][1] = Double.parseDouble(status[1]);
-
-            agent_statuses[i] = AgentStatus.fromString(status[2]);
-            if (agent_statuses[i] == AgentStatus.SICK) sick_agent_count++;
-        }
-    }
-
-    private class WandererEnvironmentPanel extends JPanel {
-        private final int DRAW_MARGIN = 10;
-        private final int DRAW_SCALE = 5;
-
-        public WandererEnvironmentPanel() {
-            super();
-            setSize(((MAX_X*DRAW_SCALE) + (DRAW_MARGIN*2)), ((MAX_Y*DRAW_SCALE) + (DRAW_MARGIN*2)));
-            setBackground(Color.BLACK);
-        }
-
-        protected void paintComponent(Graphics g) {
-            super.paintComponent(g);
-
-            // Frame
-            g.setColor(Color.WHITE);
-            g.drawRect(DRAW_MARGIN,DRAW_MARGIN,DRAW_SCALE*MAX_X,DRAW_SCALE*MAX_Y);
-
-            // Dots
-            for (int i=0; i<agent_count; i++) {
-                double[] dot = agent_positions[i];
-                AgentStatus status = agent_statuses[i];
-
-                g.setColor(status.color());
-                int x = (int) (dot[0] * DRAW_SCALE) + DRAW_MARGIN;
-                int y = (int) (dot[1] * DRAW_SCALE) + DRAW_MARGIN;
-                g.fillOval(x-(DRAW_SCALE/2), y-(DRAW_SCALE/2), DRAW_SCALE, DRAW_SCALE);
-
-                if (status == AgentStatus.SICK){
-                    g.drawOval(x-(DRAW_SCALE*contamination_radius),y-(DRAW_SCALE*contamination_radius),DRAW_SCALE*contamination_radius*2, DRAW_SCALE*contamination_radius*2);
-                }
-            }
-        }
     }
 
     private boolean arrayContains(int[] array, int element){
@@ -323,12 +256,6 @@ public class ControllerAgent extends Agent {
 
         if (confirmations != agent_count) System.out.println("Not all agents have been deleted");
         agent_count = 0;
-
-        // Deleting windows
-        if (gui_enabled) {
-            container_frame.dispose();
-            exit_confirmation_window.dispose();
-        }
 
         // Kill container
         try {
@@ -399,97 +326,4 @@ public class ControllerAgent extends Agent {
         }
     }
 
-    private void createExitConfirmationWindow(){
-        // Creation of exit confirmation window
-        exit_confirmation_window = new JFrame();
-        exit_confirmation_window.setTitle("Simulation still running");
-        exit_confirmation_window.setLayout(new FlowLayout(FlowLayout.CENTER,10,10));
-
-        JLabel exit_confirmation_info = new JLabel("The simulation is still running, stay or stop simulation:");
-        exit_confirmation_window.add(exit_confirmation_info);
-
-        JButton stay_button = new JButton("Stay");
-        stay_button.addActionListener(e -> {
-            exit_confirmation_window.setVisible(false);
-        });
-        exit_confirmation_window.add(stay_button);
-
-        JButton exit_button = new JButton("Exit simulation");
-        exit_button.addActionListener(e -> {
-            exit_confirmation_window.setVisible(false);
-            send(force_kill_message);
-        });
-        exit_confirmation_window.add(exit_button);
-
-        // Finalization of frame
-        exit_confirmation_window.setBounds(200,200,600, 80);
-        exit_confirmation_window.setResizable(false);
-    }
-
-    private void createContainerWindow() {
-        // Container frame
-        container_frame = new JFrame();
-        container_frame.setTitle(container_name);
-        container_frame.setLocation(100,100);
-
-        // TODO add statisitcs pane
-
-//        container_frame.setSize(600,600);
-//        container_frame.setPreferredSize(new Dimension(560,590));
-//        container_frame.setBounds(100, 100, (MAX_X*SCALE)+(4*MARGIN), (MAX_Y*SCALE)+(6*MARGIN));
-
-        // Content pane
-        JPanel contentPane = new JPanel();
-        Border padding = BorderFactory.createEmptyBorder(10, 10, 10, 10);
-        contentPane.setBorder(padding);
-        container_frame.add(contentPane);
-        contentPane.setLayout(new BorderLayout(20,20));
-
-        JLabel title = new JLabel(container_name + " - simulation", SwingConstants.CENTER);
-        title.setFont(new Font("Arial", Font.BOLD, 30));
-        contentPane.add(title, BorderLayout.NORTH);
-
-        wandererEnvironmentPanel = new WandererEnvironmentPanel();
-        contentPane.add(wandererEnvironmentPanel, BorderLayout.CENTER);
-
-
-        // Finalization of Frame
-        container_frame.setVisible(true);
-
-        Insets insets = container_frame.getInsets();
-        int addedWidth = insets.left + insets.right;
-        int addedHeight = insets.top + insets.bottom;
-
-//        System.out.println(title.getSize());
-
-        container_frame.setSize(540+addedWidth, 596+addedHeight);
-
-        container_frame.setResizable(false);
-        container_frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
-        container_frame.addWindowListener(new WindowListener() {
-
-            @Override
-            public void windowOpened(WindowEvent e) {}
-
-            @Override
-            public void windowClosing(WindowEvent e) {
-                exit_confirmation_window.setVisible(true);
-            }
-
-            @Override
-            public void windowClosed(WindowEvent e) {}
-
-            @Override
-            public void windowIconified(WindowEvent e) {}
-
-            @Override
-            public void windowDeiconified(WindowEvent e) {}
-
-            @Override
-            public void windowActivated(WindowEvent e) {}
-
-            @Override
-            public void windowDeactivated(WindowEvent e) {}
-        });
-    }
 }
