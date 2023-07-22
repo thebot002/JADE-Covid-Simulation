@@ -30,3 +30,5 @@ bin/
 /APDescription.txt
 /MTPs-Main-Container.txt
 /Results/
+/.ipynb_checkpoints/
+/src/.ipynb_checkpoints/

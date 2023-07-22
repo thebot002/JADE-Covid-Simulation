@@ -223,7 +223,7 @@ public class ControllerAgent extends Agent {
 
                     String[] status = replies[i].split(";");
                     AgentStatus agent_status = AgentStatus.fromString(status[2]);
-                    switch (agent_status){
+                    switch (agent_status) {
                         case SICK: sick_agent_count++; break;
                         case HEALTHY: healthy_agent_count++; break;
                         case RECOVERED: recovered_agent_count++; break;

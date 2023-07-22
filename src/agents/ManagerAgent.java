@@ -37,7 +37,7 @@ public class ManagerAgent extends Agent {
     private int container_count = 2;
     private int remote_container_count = 0;
     private int agent_count = 100;
-    private int init_sick = 10;
+    private String[] init_sick = new String[]{"10"};
     private double agent_speed = 1.0;
     private int contamination_radius = 5;
     private double contamination_prob = 0.8;
@@ -124,7 +124,7 @@ public class ManagerAgent extends Agent {
 
         // Initial sick count
         options.add(new Label("Start Sick count:"));
-        sickCountInput = new JTextField(Integer.toString(init_sick));
+        sickCountInput = new JTextField(String.join(",", init_sick));
         options.add(sickCountInput);
 
         // Agent speed
@@ -190,7 +190,7 @@ public class ManagerAgent extends Agent {
             container_count = Integer.parseInt(containerCountInput.getText());
             remote_container_count = Integer.parseInt(remoteContainerCountInput.getText());
             agent_count = Integer.parseInt(agentCountInput.getText());
-            init_sick = Integer.parseInt(sickCountInput.getText());
+            init_sick = sickCountInput.getText().split(",");
             agent_speed = Double.parseDouble(agentSpeedInput.getText());
             contamination_radius = Integer.parseInt(contaminationRadiusInput.getText());
             contamination_prob = Double.parseDouble(contaminationProbInput.getText());
@@ -258,7 +258,6 @@ public class ManagerAgent extends Agent {
         if (container_count <= 0
                 || remote_container_count < 0
                 || agent_count <= 0
-                || init_sick <= 0
                 || agent_speed <= 0
                 || contamination_radius <= 0
                 || min_contamination_length < 0
@@ -274,8 +273,25 @@ public class ManagerAgent extends Agent {
             return false;
         }
 
-        if (init_sick >= agent_count){
-            System.out.println("init sick amount can't be larger than agent count");
+        // For each init sick
+        if (init_sick.length != 1 && init_sick.length != container_count){
+            System.out.println("Init sick must be eiter a single value or a list of <container_count> amount");
+            return false;
+        }
+
+        boolean has_non_zero = false;
+        for (String init_sick_count: init_sick) {
+            if (Integer.parseInt(init_sick_count) > 0){
+                has_non_zero = true;
+            }
+
+            if ((Integer.parseInt(init_sick_count)) >= agent_count){
+                System.out.println("init sick amount can't be larger than agent count");
+                return false;
+            }
+        }
+        if (!has_non_zero){
+            System.out.println("At least one sick count must be higher than zero");
             return false;
         }
 
@@ -301,7 +317,7 @@ public class ManagerAgent extends Agent {
 
             String parameters = "";
             parameters += " " + agent_count;
-            parameters += " " + init_sick;
+            parameters += " " + String.join(",", init_sick);
             parameters += " " + agent_speed;
             parameters += " " + contamination_radius;
             parameters += " " + contamination_prob;
@@ -325,11 +341,15 @@ public class ManagerAgent extends Agent {
             try {
                 AgentContainer mc = getContainerController();
 
+                int sick_count;
+                if (init_sick.length == 1) sick_count = Integer.parseInt(init_sick[0]);
+                else sick_count = Integer.parseInt(init_sick[i]);
+
                 // Creating the controller
                 Object[] controller_arguments = new Object[]{
                         container_name,
                         agent_count,
-                        init_sick,
+                        sick_count,
                         agent_speed,
                         contamination_radius,
                         contamination_prob,
@@ -450,7 +470,7 @@ public class ManagerAgent extends Agent {
             File myObj = new File(file_path);
             myObj.getParentFile().mkdirs();
             if (myObj.createNewFile()) {
-                System.out.println("File created: " + myObj.getName());
+                System.out.println("File created: " + "Simulation_" + timestamp + "/" + myObj.getName());
             }
 
             // Write to file

@@ -38,7 +38,7 @@ public class RemoteManagerAgent extends Agent {
                     int container_count = Integer.parseInt(message_content_parts[1]);
 
                     int agent_count = Integer.parseInt(message_content_parts[2]);
-                    int init_sick = Integer.parseInt(message_content_parts[3]);
+                    String[] init_sick = message_content_parts[3].split(",");
                     double agent_speed = Double.parseDouble(message_content_parts[4]);
                     int contamination_radius = Integer.parseInt(message_content_parts[5]);
                     double contamination_prob = Double.parseDouble(message_content_parts[6]);
@@ -52,6 +52,10 @@ public class RemoteManagerAgent extends Agent {
                         int container_id = i + 1;
                         String container_name = "Remote-Container-" + container_id;
 
+                        int sick_count;
+                        if (init_sick.length == 1) sick_count = Integer.parseInt(init_sick[0]);
+                        else sick_count = Integer.parseInt(init_sick[i]);
+
                         try {
                             AgentContainer mc = getContainerController();
 
@@ -59,7 +63,7 @@ public class RemoteManagerAgent extends Agent {
                             Object[] controller_arguments = new Object[]{
                                     container_name,
                                     agent_count,
-                                    init_sick,
+                                    sick_count,
                                     agent_speed,
                                     contamination_radius,
                                     contamination_prob,
