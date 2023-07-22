@@ -57,6 +57,10 @@ public class ControllerAgent extends Agent {
     private ACLMessage controller_travel_done_message;
     private ACLMessage kill_msg;
     private ACLMessage all_statuses_message;
+    private ACLMessage kill_confirm_msg;
+
+    // Agent statuses time series
+    String status_time_series = "total,healthy,sick,recovered\n";
 
     @Override
     protected void setup() {
@@ -94,6 +98,7 @@ public class ControllerAgent extends Agent {
 
         // Create done message to manager
         done_message = createMessage(ACLMessage.INFORM, "done", manager_agent);
+        kill_confirm_msg = createMessage(ACLMessage.INFORM, "kill_confirm", manager_agent);
 
         // GENERATION OF WANDERER AGENTS
         generateAgents();
@@ -105,6 +110,7 @@ public class ControllerAgent extends Agent {
         // Receive initial locations back
         String[] replies = new String[agent_count];
         for (int i = 0; i < agent_count; i++) replies[i] = blockingReceive(status_message_template).getContent();
+        status_time_series += agent_count + "," + (agent_count - sick_agent_count) + "," + sick_agent_count + "," + 0 + "\n";
 
         // Setup go and travel message
         move_go_msg = createMessage(ACLMessage.INFORM, "GO", wanderer_agents);
@@ -210,13 +216,20 @@ public class ControllerAgent extends Agent {
                 // Receive new locations and statuses
                 String[] replies = new String[agent_count];
                 sick_agent_count = 0;
+                int healthy_agent_count = 0;
+                int recovered_agent_count = 0;
                 for (int i = 0; i < agent_count; i++) {
                     replies[i] = blockingReceive(status_message_template).getContent();
 
                     String[] status = replies[i].split(";");
                     AgentStatus agent_status = AgentStatus.fromString(status[2]);
-                    if (agent_status == AgentStatus.SICK) sick_agent_count++;
+                    switch (agent_status){
+                        case SICK: sick_agent_count++; break;
+                        case HEALTHY: healthy_agent_count++; break;
+                        case RECOVERED: recovered_agent_count++; break;
+                    }
                 }
+                status_time_series += agent_count + "," + healthy_agent_count + "," + sick_agent_count + "," + recovered_agent_count + "\n";
 
                 // GUI agent sending of statuses
                 String all_replies = String.join("-", replies);
@@ -255,6 +268,10 @@ public class ControllerAgent extends Agent {
 
         if (confirmations != agent_count) System.out.println("Not all agents have been deleted");
         agent_count = 0;
+
+        // Send confirmation and stats about run
+        kill_confirm_msg.setContent(status_time_series);
+        send(kill_confirm_msg);
 
         // Kill container
         try {

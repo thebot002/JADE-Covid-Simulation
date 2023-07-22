@@ -280,8 +280,8 @@ public class WanderingAgent extends Agent {
 
         double headingRads = (this.headingDegrees * Math.PI) / 180;
 
-        double dx = Math.cos(headingRads);
-        double dy = Math.sin(headingRads);
+        double dx = Math.cos(headingRads) * speed;
+        double dy = Math.sin(headingRads) * speed;
 
         // Bounce on walls
         if (position[0] + dx < 0 || position[0] + dx > MAX_X ) dx *= -1;

@@ -17,8 +17,11 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.InputStream;
 import java.io.IOException;
+import java.sql.Timestamp;
+import java.text.SimpleDateFormat;
 import java.util.Objects;
 
 import static java.lang.Thread.sleep;
@@ -80,7 +83,7 @@ public class ManagerAgent extends Agent {
     private InputStream remote_input_stream;
 
     //debug
-    private final boolean DEBUG = true;
+    private final boolean DEBUG = false;
 
     @Override
     protected void setup() {
@@ -414,7 +417,7 @@ public class ManagerAgent extends Agent {
 
             // Tracking time end
             long duration_s = System.currentTimeMillis() - start_time;
-//            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
+            if (DEBUG) System.out.println("[Manager] Iteration done in (ms): " + duration_s);
         }
     }
 
@@ -422,6 +425,43 @@ public class ManagerAgent extends Agent {
         ACLMessage kill_message = createMessage(ACLMessage.INFORM, "kill", controller_agents);
         kill_message.addReceiver(gui_agent);
         send(kill_message);
+
+        MessageTemplate kill_confirm_template = getMessageTemplate(ACLMessage.INFORM, "kill_confirm");
+
+        SimpleDateFormat timestamp_format = new SimpleDateFormat("yyyyMMdd_HHmmss");
+        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+        String timestamp_string = timestamp_format.format(timestamp);
+
+        for (int i = 0; i < container_count; i++) {
+            ACLMessage kill_confirm_message = blockingReceive(kill_confirm_template);
+
+            String container_name = kill_confirm_message.getSender().getName().split("@")[0];
+            String container_timer_series = kill_confirm_message.getContent();
+
+            writeContainerTimeSeries(timestamp_string, container_name, container_timer_series);
+        }
+    }
+
+    private void writeContainerTimeSeries(String timestamp, String container, String content) {
+        try {
+            String file_path = "./Results/Simulation_" + timestamp + "/" + container + ".csv";
+
+            // Create file
+            File myObj = new File(file_path);
+            myObj.getParentFile().mkdirs();
+            if (myObj.createNewFile()) {
+                System.out.println("File created: " + myObj.getName());
+            }
+
+            // Write to file
+            FileWriter myWriter = new FileWriter(file_path);
+            myWriter.write(content);
+            myWriter.close();
+
+        } catch (IOException e) {
+            System.out.println("An error occurred.");
+            e.printStackTrace();
+        }
     }
 
     private void launchRemote() {
